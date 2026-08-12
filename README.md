@@ -11,7 +11,7 @@ Every session is a worker. Reads, greps and bash runs become mining, logging and
 ## Quick start
 
 ```
-npx github:sungeunstar/hearthling
+npx hearthling
 ```
 
 or
