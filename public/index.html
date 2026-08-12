@@ -30,6 +30,15 @@
     color:var(--ink); font:inherit; font-size:12px; padding:6px 12px; border-radius:8px; cursor:pointer; }
   #usageBtn:hover, #langBtn:hover { background:rgba(255,255,255,.12); }
 
+  /* 세션이 하나도 없을 때 — 빈 마을이 고장으로 보이지 않게 */
+  #emptyHint { position:fixed; left:50%; top:46%; transform:translate(-50%,-50%); z-index:14;
+    background:rgba(10,12,16,.82); border:1px solid rgba(255,255,255,.14); border-radius:12px;
+    padding:18px 24px; text-align:center; max-width:min(420px, 86vw); display:none;
+    backdrop-filter:blur(6px); }
+  #emptyHint.show { display:block; }
+  #emptyHint b { display:block; font-size:15px; margin-bottom:6px; }
+  #emptyHint span { font-size:13px; color:rgba(255,255,255,.62); line-height:1.6; }
+
   /* 하단 최근 활동 */
   #feed { position:fixed; left:0; right:0; bottom:0; z-index:12; padding:0 18px 14px;
     display:flex; flex-direction:column; gap:5px; color:var(--ink); pointer-events:none;
@@ -120,6 +129,7 @@
 </div>
 <div id="usage"></div>
 <div id="feed"></div>
+<div id="emptyHint"></div>
 <div id="pop"></div>
 <div id="timeline">
   <div class="tlHead">
@@ -185,6 +195,9 @@ const disp = s => KO ? s : (DISP_EN[s] || s);
     document.getElementById('usageBtn').textContent = 'Usage';
     document.querySelector('#timeline .eyebrow').textContent = 'job history';
   }
+  document.getElementById('emptyHint').innerHTML = KO
+    ? '<b>아직 마을이 비어 있다</b><span>Claude Code 세션을 시작하면 워커가 나타난다.<br>최근 20분 안에 활동한 세션이 워커가 된다.</span>'
+    : '<b>The village is empty</b><span>Start a Claude Code session and a worker will appear.<br>Sessions active in the last 20 minutes become villagers.</span>';
 }
 
 // ── 실제 게임(codex/tomob)과 동일한 BVH 가속 레이캐스트 — terrain.js의 groundAt과 같은 기법 ──
@@ -2508,6 +2521,7 @@ async function poll(){
     ]);
     latestJobs = jr.jobs;
     updateBuildSite(jr.jobs);
+    document.getElementById('emptyHint').classList.toggle('show', jr.jobs.length === 0);
 
     // 상단 요약 — 카드 나열 대신 "몇 개가 돌고 있는지"만
     document.getElementById('stActive').textContent = jr.jobs.filter(j => j.state === 'active').length;
@@ -3036,9 +3050,8 @@ function tickWorker(w, now, dt){
 }
 
 const clock = new THREE.Clock();
-function animate(){
-  requestAnimationFrame(animate);
-  const dt = clock.getDelta();
+// 한 프레임 전부(믹서·상태머신·바다·하늘·렌더). rAF 루프와 수동 스텝(__step)이 같은 함수를 쓴다.
+function frame(dt){
   const now = nowMs();
   for (const w of workers.values()){
     if (w.mixer) w.mixer.update(dt);
@@ -3072,7 +3085,30 @@ function animate(){
   controls.update();
   renderer.render(scene, camera);
 }
+function animate(){
+  requestAnimationFrame(animate);
+  frame(clock.getDelta());
+}
 animate();
+
+// ── 데모 캡처 — 백그라운드 탭은 rAF가 멈추므로, 가상 시계를 밀며 수동으로 프레임을 만든다 ──
+// __step(dt): 한 프레임 진행+렌더 (__frame은 카메라 디버그 훅이 선점해서 이름을 피했다).
+// __record(n, fps, w): n프레임을 연속으로 만들어 JPEG로 서버에 저장.
+window.__step = (dt = 1/30) => { SIM_OFFSET += dt*1000; frame(dt); };
+window.__recIdx = 0;
+window.__record = async (frames = 120, fps = 24, width = 960) => {
+  const src = renderer.domElement;
+  const c = document.createElement('canvas');
+  c.width = width; c.height = Math.round(src.height * width / src.width);
+  const g = c.getContext('2d');
+  for (let i = 0; i < frames; i++){
+    window.__step(1/fps);
+    g.drawImage(src, 0, 0, c.width, c.height);
+    const n = String(window.__recIdx++).padStart(4, '0');
+    await fetch('/api/snapshot?name=frame-' + n, { method: 'POST', body: c.toDataURL('image/jpeg', 0.85) });
+  }
+  return window.__recIdx;
+};
 
 // ══ 검증 훅 — 렌더 없이 상태 머신만 흘려보낸다 ══
 // 워커 이동·작업·납품은 rAF에 묶여 있어 백그라운드 자동화 탭에서는 원리상 관찰이 불가능했다.

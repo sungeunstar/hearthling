@@ -573,7 +573,12 @@ function handle(req, res) {
         const dir = path.join(__dirname, 'snapshots');
         fs.mkdirSync(dir, { recursive: true });
         const ext = m[1] === 'jpeg' ? '.jpg' : '.png';
-        const file = path.join(dir, 'snapshot-' + new Date().toISOString().replace(/[:.]/g, '-') + ext);
+        // ?name=frame-0001 처럼 이름을 지정하면 그 이름으로 저장(데모 프레임 연번용)
+        const nameParam = u.searchParams.get('name');
+        const base = (nameParam && /^[a-zA-Z0-9_-]{1,64}$/.test(nameParam))
+          ? nameParam
+          : 'snapshot-' + new Date().toISOString().replace(/[:.]/g, '-');
+        const file = path.join(dir, base + ext);
         fs.writeFileSync(file, Buffer.from(m[2], 'base64'));
         sendJson(res, 200, { saved: file });
       } catch (e) { sendJson(res, 500, { error: String((e && e.message) || e) }); }

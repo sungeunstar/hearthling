@@ -2,9 +2,14 @@
   "name": "hearthling",
   "version": "0.1.0",
   "description": "Watch your AI agents work — your Claude Code sessions as a living game village. Local-only.",
-  "bin": { "hearthling": "server/server.js" },
-  "scripts": { "start": "node server/server.js" },
-  "engines": { "node": ">=18" },
+  "keywords": ["claude-code", "claude", "dashboard", "visualization", "agents", "ai", "monitoring", "threejs"],
+  "homepage": "https://hearthling.vercel.app",
+  "repository": { "type": "git", "url": "git+https://github.com/sungeunstar/hearthling.git" },
+  "bugs": { "url": "https://github.com/sungeunstar/hearthling/issues" },
   "license": "MIT",
-  "private": true
+  "author": "sungeunstar",
+  "bin": { "hearthling": "server/server.js" },
+  "files": ["server/", "public/", "start-hearthling.cmd"],
+  "scripts": { "start": "node server/server.js" },
+  "engines": { "node": ">=18" }
 }

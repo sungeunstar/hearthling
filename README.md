@@ -2,7 +2,7 @@
 
 Watch your AI agents work — a local dashboard that renders your Claude Code sessions as a living game village.
 
-![hearthling village](docs/assets/hero.jpg)
+![hearthling demo](docs/assets/demo.gif)
 
 Every session is a worker. Reads, greps and bash runs become mining, logging and hauling. When an agent finishes its job, a building goes up. Workers wear their model name and generated-token count as a nameplate.
 
