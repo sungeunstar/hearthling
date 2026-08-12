@@ -1,0 +1,10 @@
+{
+  "name": "agentview",
+  "version": "0.1.0",
+  "description": "Claude Code 세션을 게임 마을 장면으로 보여주는 로컬 대시보드",
+  "bin": { "agentview": "server/server.js" },
+  "scripts": { "start": "node server/server.js" },
+  "engines": { "node": ">=18" },
+  "license": "MIT",
+  "private": true
+}

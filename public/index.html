@@ -1,0 +1,3116 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>agentview</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
+<style>
+  /* ══ 게임 HUD (2026-08-11 재설계) ══
+     사령관 컨펌: "게임 HUD로 완전 전환" — 상단 요약 바 / 게임 화면 전체 / 하단 최근 활동 3줄 /
+     워커 클릭 시 말풍선. 기존의 우측 job 카드 나열과 좌하단 raw 로그는 걷어낸다. */
+  html, body { margin:0; height:100%; background:#0c0f0a; overflow:hidden;
+    font-family:'Pretendard Variable', Pretendard, system-ui, sans-serif;
+    -webkit-font-smoothing:antialiased; }
+  :root { --ink:#eef3e9; --dim:rgba(238,243,233,.55); --line:rgba(255,255,255,.10);
+    --panel:rgba(12,16,10,.72); --accent:#9fe07a; }
+  .num { font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
+
+  /* 상단 바 */
+  #topbar { position:fixed; top:0; left:0; right:0; height:52px; z-index:14;
+    display:flex; align-items:center; gap:18px; padding:0 18px; color:var(--ink);
+    background:linear-gradient(180deg, rgba(8,11,7,.82) 0%, rgba(8,11,7,.34) 62%, transparent 100%);
+    pointer-events:none; }
+  #topbar .brand { font-size:13px; font-weight:700; letter-spacing:.02em; opacity:.9; }
+  #topbar .brand em { font-style:normal; color:var(--accent); }
+  #topbar .spacer { flex:1; }
+  #topbar .stat { display:flex; align-items:baseline; gap:6px; font-size:12px; color:var(--dim); }
+  #topbar .stat b { font-size:15px; font-weight:700; color:var(--ink); }
+  #topbar .sep { width:1px; height:16px; background:var(--line); }
+  #usageBtn { pointer-events:auto; background:rgba(255,255,255,.06); border:1px solid var(--line);
+    color:var(--ink); font:inherit; font-size:12px; padding:6px 12px; border-radius:8px; cursor:pointer; }
+  #usageBtn:hover { background:rgba(255,255,255,.12); }
+
+  /* 하단 최근 활동 */
+  #feed { position:fixed; left:0; right:0; bottom:0; z-index:12; padding:0 18px 14px;
+    display:flex; flex-direction:column; gap:5px; color:var(--ink); pointer-events:none;
+    background:linear-gradient(0deg, rgba(8,11,7,.78) 0%, rgba(8,11,7,.28) 60%, transparent 100%); padding-top:44px; }
+  #feed .row { display:flex; align-items:center; gap:9px; font-size:12px; opacity:.92;
+    animation:feedIn .22s ease; }
+  @keyframes feedIn { from { opacity:0; transform:translateY(5px); } to { opacity:.92; transform:none; } }
+  #feed .dot { width:6px; height:6px; border-radius:50%; background:var(--accent); flex:0 0 auto; }
+  #feed .who { font-weight:600; }
+  #feed .what { color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  /* 워커 말풍선 */
+  #pop { position:fixed; z-index:15; display:none; min-width:186px; max-width:280px;
+    background:var(--panel); backdrop-filter:blur(10px); border:1px solid var(--line);
+    border-radius:11px; padding:11px 13px; color:var(--ink); font-size:12px;
+    box-shadow:0 14px 34px rgba(0,0,0,.45); }
+  #pop.open { display:block; }
+  #pop .ptop { display:flex; align-items:center; gap:7px; margin-bottom:7px; }
+  #pop .pmodel { font-weight:700; font-size:13px; }
+  #pop .pbadge { font-size:9.5px; padding:2px 6px; border-radius:5px; }
+  #pop .ptitle { color:var(--dim); line-height:1.45; margin-bottom:8px;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  #pop .prow { display:flex; justify-content:space-between; gap:10px; padding:3px 0; font-size:11.5px; }
+  #pop .prow span { color:var(--dim); }
+  #pop .phist { margin-top:9px; width:100%; background:rgba(255,255,255,.06); border:1px solid var(--line);
+    color:var(--ink); font:inherit; font-size:11px; padding:5px 0; border-radius:7px; cursor:pointer; }
+  #pop .phist:hover { background:rgba(255,255,255,.13); }
+  .st { display:inline-block; padding:1px 6px; border-radius:4px; font-size:10px; }
+  .st-active{background:#2e7d32;} .st-blocked{background:#a56b12;} .st-failed{background:#8a2f2f;} .st-done{background:#2f5f8a;} .st-completed{background:#2f5f8a;} .st-queued{background:#555;} .st-idle{background:#4a4f45;}
+  /* ── job 히스토리 드로어(사령관 "git 히스토리뜨는것도 UX/UI 불편해보임" 2026-08-08 개선) ──
+     기존: 왼쪽에 즉시 display:block되는 밋밋한 목록, user/assistant 구분 없음, state 색 없음, 긴 답변 통짜 텍스트.
+     개선: 슬라이드 인 드로어 + user/assistant 턴 구분(말풍선 정렬) + job 카드와 동일한 state 색 배지 재사용 +
+           상대시간 + 긴 답변은 기본 접힘(요약만) → 클릭 시 펼침(경량 마크다운: 코드블록/인라인코드/굵게만 처리). */
+  #timeline { position:fixed; left:0; top:0; bottom:0; width:420px; max-width:92vw; background:rgba(14,18,11,.97); backdrop-filter:blur(6px); border-right:1px solid rgba(255,255,255,.1); box-shadow:18px 0 40px rgba(0,0,0,.35); z-index:20; display:flex; flex-direction:column; color:#e8efe0; font-size:12.5px; transform:translateX(-100%); transition:transform .22s ease; }
+  #timeline.open { transform:translateX(0); }
+  #timeline .tlHead { position:sticky; top:0; padding:16px 18px 12px; border-bottom:1px solid rgba(255,255,255,.08); background:rgba(14,18,11,.97); flex:0 0 auto; }
+  #timeline .tlHead .eyebrow { font-size:10px; letter-spacing:.06em; text-transform:uppercase; opacity:.5; margin-bottom:3px; }
+  #timeline h3 { margin:0; font-size:14.5px; font-weight:700; line-height:1.35; padding-right:26px; }
+  #timeline .tlCount { font-size:10.5px; opacity:.45; margin-top:3px; }
+  #timeline .close { position:absolute; top:14px; right:16px; cursor:pointer; opacity:.55; width:24px; height:24px; display:flex; align-items:center; justify-content:center; border-radius:6px; font-size:13px; }
+  #timeline .close:hover { opacity:1; background:rgba(255,255,255,.08); }
+  #timeline .tlBody { overflow:auto; padding:14px 16px 24px; flex:1 1 auto; }
+  #timeline .empty { opacity:.45; padding:20px 4px; text-align:center; }
+  #timeline .turn { display:flex; margin-bottom:12px; }
+  #timeline .turn.user { justify-content:flex-end; }
+  #timeline .turn.assistant { justify-content:flex-start; }
+  #timeline .bubble { max-width:88%; border-radius:10px; padding:8px 10px; border:1px solid rgba(255,255,255,.08); }
+  #timeline .turn.user .bubble { background:rgba(63,109,163,.16); border-color:rgba(120,170,220,.25); border-top-right-radius:2px; }
+  #timeline .turn.assistant .bubble { background:rgba(255,255,255,.045); border-top-left-radius:2px; }
+  #timeline .bmeta { display:flex; align-items:center; gap:6px; margin-bottom:4px; font-size:10px; opacity:.6; }
+  #timeline .bmeta .who { font-weight:700; opacity:.85; }
+  #timeline .pill { display:inline-block; padding:1px 6px; border-radius:4px; font-size:9.5px; color:#fff; }
+  #timeline .detail { white-space:pre-wrap; word-break:break-word; line-height:1.5; }
+  #timeline .more { margin-top:6px; background:none; border:none; color:#8fd0ff; font-size:10.5px; cursor:pointer; padding:2px 0; opacity:.85; font-family:inherit; }
+  #timeline .more:hover { opacity:1; text-decoration:underline; }
+  #timeline .full { margin-top:6px; padding-top:6px; border-top:1px dashed rgba(255,255,255,.1); white-space:pre-wrap; word-break:break-word; line-height:1.55; font-size:12px; opacity:.92; display:none; }
+  #timeline .full.show { display:block; }
+  #timeline .full code { background:rgba(255,255,255,.1); padding:0 4px; border-radius:3px; font-size:11px; }
+  #timeline .full pre { background:rgba(0,0,0,.35); border:1px solid rgba(255,255,255,.08); border-radius:6px; padding:8px; overflow:auto; font-size:11px; margin:6px 0; }
+  /* ── 토큰 사용량 패널(사령관 "일별로 주별로 얼마나 에이전트 토큰을 썼는지 알 수 있으면 좋겠다" 2026-08-11) ── */
+  #usage { position:fixed; top:58px; right:18px; width:392px; max-width:92vw; max-height:78vh; overflow:auto; background:var(--panel); backdrop-filter:blur(10px); border:1px solid var(--line); border-radius:12px; box-shadow:0 18px 40px rgba(0,0,0,.45); z-index:21; color:var(--ink); font-size:12px; padding:14px 16px 18px; display:none; }
+  #usage.open { display:block; }
+  #usage h4 { margin:0 0 2px; font-size:13.5px; }
+  #usage .sub { opacity:.5; font-size:10.5px; margin-bottom:12px; }
+  #usage .sect { font-size:10px; letter-spacing:.06em; text-transform:uppercase; opacity:.5; margin:14px 0 7px; }
+  #usage .row { display:grid; grid-template-columns:74px 1fr 76px; align-items:center; gap:8px; margin-bottom:5px; }
+  #usage .row .lb { opacity:.72; font-size:11px; font-variant-numeric:tabular-nums; }
+  #usage .row .vl { text-align:right; font-variant-numeric:tabular-nums; opacity:.9; }
+  #usage .row.today .lb, #usage .row.today .vl { color:#9fe07a; opacity:1; font-weight:600; }
+  #usage .track { height:13px; background:rgba(255,255,255,.05); border-radius:3px; overflow:hidden; display:flex; }
+  #usage .track i { display:block; height:100%; }
+  #usage .legend { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; font-size:10.5px; opacity:.75; }
+  #usage .legend span i { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:4px; }
+  #usage .tot { margin-top:12px; padding-top:10px; border-top:1px solid rgba(255,255,255,.1); display:flex; justify-content:space-between; font-size:11.5px; }
+  #usage .note { margin-top:9px; opacity:.42; font-size:10px; line-height:1.5; }
+</style>
+</head>
+<body>
+<div id="topbar">
+  <div class="brand">agent<em>view</em></div>
+  <div class="spacer"></div>
+  <div class="stat"><b class="num" id="stActive">0</b> 작업 중</div>
+  <div class="sep"></div>
+  <div class="stat"><b class="num" id="stToday">–</b> 오늘 생성</div>
+  <div class="sep"></div>
+  <button id="usageBtn">사용량</button>
+</div>
+<div id="usage"></div>
+<div id="feed"></div>
+<div id="pop"></div>
+<div id="timeline">
+  <div class="tlHead">
+    <span class="close" id="tlClose">✕</span>
+    <div class="eyebrow">job 히스토리</div>
+    <h3 id="tlTitle"></h3>
+    <div class="tlCount" id="tlCount"></div>
+  </div>
+  <div class="tlBody" id="tlBody"></div>
+</div>
+<script type="importmap">{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+  "three-mesh-bvh":"https://esm.sh/three-mesh-bvh@0.7.0?external=three",
+  "three-bvh-csg":"https://esm.sh/three-bvh-csg@0.0.16?external=three,three-mesh-bvh"
+}}</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
+// ★사령관 지시(2026-08-10) "곡괭이질할 때 실제 게임처럼 물리엔진 적용, 점점 부서지는 거 그대로 구현" —
+//   실제 게임 modules/mine.js가 쓰는 것과 같은 CSG(three-bvh-csg). 곡괭이가 닿을 때마다 작은 구를 빼서
+//   진짜로 부피가 패이고(CARVE_MAX회 누적), 임계치에서 조각나며 Rapier 파편이 튄다.
+import { Brush, Evaluator, SUBTRACTION } from 'three-bvh-csg';
+// ★사령관 지시(2026-08-10): "SKY도 불러와, 해랑 구름 시스템도" — 실제 게임 모듈을 **원본 그대로** 복사해 씀
+//   (public/modules/sky.js, nightsky.js는 codex/tomob/modules/의 무수정 사본).
+//   sky.js = 태양 방향·조명 곡선·태양 스프라이트·fbm 구름 돔·별/달, nightsky.js = 하늘 돔 본체(낮 하늘색·태양 디스크).
+import { initSky } from './modules/sky.js';
+import { initNightSky } from './modules/nightsky.js';
+
+// ── 실제 게임(codex/tomob)과 동일한 BVH 가속 레이캐스트 — terrain.js의 groundAt과 같은 기법 ──
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
+
+// ── 실제 게임과 같은 물리엔진(Rapier) — 이 대시보드는 리지드바디까지는 안 쓰지만(워커는 스크립트 이동),
+//   "물리엔진도 이미 구현돼 있다"는 사령관 지시대로 게임과 동일하게 실제로 붙여둔다.
+let RAPIER = null, physicsWorld = null;
+import('https://esm.sh/@dimforge/rapier3d-compat@0.14.0').then(async (mod) => {
+  RAPIER = mod.default || mod;
+  await RAPIER.init();
+  physicsWorld = new RAPIER.World({ x: 0, y: -22, z: 0 });
+  console.log('[agentview] Rapier 물리엔진 초기화 완료(실제 게임과 동일 버전)');
+}).catch(e => console.warn('[agentview] Rapier load fail', e));
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0c0f0a);
+scene.fog = new THREE.Fog(0x0c0f0a, 50, 170);
+
+// ── 쿼터뷰(디아블로식 아이소메트릭) 카메라 — 사령관이 직접 저장한 실제 플레이 스크린샷(HUD 포함,
+//   project/agentview/1.png)을 픽셀 단위로 실측(2026-08-08): 원형 제단(나락 제단)의 타원 비율(높이/너비≈0.47~0.6)
+//   로 역산한 피치 ≈ 28~37°(수학적 '완전 등각' 35.264°에 더 가까움 — 기존 45°는 너무 가팔랐다). 캐릭터 키는
+//   화면 높이의 약 17%(기존 세팅의 7~8%보다 훨씬 큼 — 실제 플레이 화면은 그렇게 안 멀리서 안 봄).
+// ★사령관 선택(2026-08-10): "화면 상단에 하늘·수평선이 보이게" — 기하학적으로 피치 35°에서는 FOV를 70° 넘게
+//   키우지 않는 한 수평선이 절대 화면에 안 들어온다(수평선은 시선 0°에 있는데 화면 상단이 피치-FOV/2 이므로).
+//   그래서 피치를 눕히고 FOV를 넓힌다. 대신 12차에 실측으로 맞춘 **캐릭터 크기는 보존**한다 —
+//   FOV가 넓어진 만큼 거리를 줄여 수직 시야폭(2·dist·tan(FOV/2))이 이전과 같아지게 DIST_MUL을 역산해뒀다.
+//   하늘 비중 = (FOV/2 - PITCH) / FOV ≈ 17%.
+const PITCH_DEG = 11.5; // 하늘 비중 ≈ (22.5-11.5)/45 ≈ 24% — 사령관이 고른 "상단 25%"에 맞춘 값
+const FOV_DEG = 45;
+// 이전 구도(FOV 26 · dist 1.65R)와 같은 수직 시야폭이 나오는 거리 배수 = 1.65·tan(13°)/tan(22.5°)
+const DIST_MUL = 1.65 * Math.tan(26/2 * Math.PI/180) / Math.tan(FOV_DEG/2 * Math.PI/180);
+const camera = new THREE.PerspectiveCamera(FOV_DEG, innerWidth/innerHeight, 0.1, 900);
+camera.position.set(0, 34, 32);
+camera.lookAt(0, 4, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+// ★사령관 "게임 본편 섬 다시가서 확인해봐"(2026-08-08) — 실제 게임을 직접 켜서 색이 더 진하고 채도
+// 높다는 걸 확인. `modules/sky.js`(initSky)엔 ACESFilmicToneMapping@0.62가 있었지만, 그대로 이식해서
+// 스크린샷 픽셀을 직접 실측해보니(Python) 초록이 (130,127,110) 같은 흙빛으로 뭉개졌다 — 알고 보니
+// sky.js 주석에 실제 게임팀도 "ACESFilmic이 하이라이트를 흰색/무채색으로 수렴시켜 채도가 레퍼런스의
+// 0.38배로 죽는다"고 이미 진단해놓고, 채도 보존 목적의 Neutral(PBR Neutral)로 갈아탈 라이브 튜닝
+// 훅(__tonemap/__exposure)까지 만들어둔 상태였음. 그 판단을 그대로 따라 Neutral로 이식(AgX는 r163+
+// 필요, 이 프로젝트가 쓰는 three@0.160.0엔 없음).
+renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.toneMappingExposure = 1.0;
+document.body.appendChild(renderer.domElement);
+renderer.domElement.style.position = 'fixed';
+renderer.domElement.style.inset = '0';
+renderer.domElement.style.zIndex = '0';
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 4, 0);
+controls.enablePan = false;
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 26;
+controls.maxDistance = 75;
+controls.minPolarAngle = THREE.MathUtils.degToRad(32);
+// ★하늘 이식(2026-08-10): 기존 상한 64°에서는 카메라를 아무리 눕혀도 수평선 위가 화면에 안 들어와
+//   해·구름·하늘을 볼 수 없었다. 기본 구도(35.264° 피치)는 그대로 두고 드래그 여유만 늘린다.
+controls.maxPolarAngle = THREE.MathUtils.degToRad(86);
+controls.update();
+window.__camera = camera; window.__controls = controls; // 디버그 훅
+
+// ★사령관 지적(2026-08-08, 재지적): "디아블로 쿼터뷰가 아님" — 실제 디아블로4 스크린샷을 직접 찾아 대조
+//   (WebSearch 이미지 결과): 핵심은 피치 각도뿐 아니라 카메라가 타겟을 정면(+Z축)이 아니라 **대각선(요(yaw) 45°)
+//   에서 내려다본다**는 것 — 그래야 건물·지형이 두 면이 동시에 보이는 등각 느낌이 난다. 기존엔 pitch만 맞고
+//   yaw가 거의 0(정면)이라 "그냥 위에서 본 원근 카메라"처럼 보였다.
+const YAW_DEG = 45;
+// ★버그(2026-08-08 22차 실측): 워커·노드 배치 반경(ACTIVITY_RADIUS=42 고정)이 카메라가 실제로 담는 화면 범위보다
+//   훨씬 넓어서 워커가 전원 프레임 밖에 있었다(NDC x = 1.18 / 3.61 / -2.34로 실측). 좁은 FOV(26°)에서 병목은
+//   좌우이고, 그 폭은 창 비율(aspect)에 정비례한다 — 세로로 긴 창에서는 더 심해진다.
+//   → 여기서 "카메라가 실제로 담는 지면 반경"(FRAME_R)을 투영 파라미터로 직접 계산하고,
+//     워커 스폰·노드 배치는 전부 이 값을 기준으로 삼는다(고정 상수 대신).
+let FRAME_R = 21; // fitCameraToAnchor()에서 실제 투영값으로 덮어씀(선언 순서상 ACTIVITY_RADIUS를 아직 못 읽어 리터럴)
+let DEPTH_GAIN = 1;                       // 화면 상하(깊이) 방향으로 더 넓게 배치할 배율
+const CAM_FWD = new THREE.Vector3(0,0,-1);  // 카메라가 보는 수평 방향(=화면 상하 축)
+const CAM_RIGHT = new THREE.Vector3(1,0,0); // 화면 좌우 축
+let islandReady = false; // 섬 로드+ANCHOR 확정 후에만 재프레이밍이 의미 있다(리사이즈 핸들러 가드)
+// 카메라 거리 — fitCameraToAnchor와 cameraViewBlockedAt(ANCHOR 후보의 시야 판정)이 **같은 값**을 써야
+// "후보로는 통과했는데 실제로는 산에 파묻히는" 어긋남이 안 생긴다.
+function camDistance(){
+  const aspect = innerWidth / innerHeight;
+  // 세로로 긴 창(사령관 모니터 1440×2560)에서는 좌우 시야가 좁아 활동권이 안 들어온다 → 최소한만 후퇴.
+  const zoomComp = Math.min(1.15, Math.max(1, 1.6 / aspect));
+  return ACTIVITY_RADIUS * DIST_MUL * zoomComp;
+}
+function fitCameraToAnchor(){
+  // ★실측(1.png 픽셀 크롭 대조) 기준 재조정 — 캐릭터 키 ≈ 화면 높이 17%가 되도록 거리를 줄였다
+  // (기존 3.6R=7~8%는 실제 플레이 화면보다 훨씬 멀었음).
+  camera.aspect = innerWidth / innerHeight;
+  // ★사령관 모니터는 세로(1440×2560, aspect≈0.6) — 좌우 시야가 좁다. 여기서 카메라를 뒤로 빼서 해결하면
+  //   12차에 실측으로 맞춘 "캐릭터가 크게 보이는" 구도가 다시 망가진다. 그래서 후퇴는 최소로만 하고(≤1.15배),
+  //   대신 워커/노드 배치를 화면 모양에 맞춘 타원(좌우 좁게·깊이 넓게)으로 돌린다(hashPos 참고).
+  const dist = camDistance();
+  const pitchRad = THREE.MathUtils.degToRad(PITCH_DEG);
+  const yawRad = THREE.MathUtils.degToRad(YAW_DEG);
+  const horiz = dist * Math.cos(pitchRad), height = dist * Math.sin(pitchRad);
+  // ★버그(22차): 타겟 y가 절대값(ACTIVITY_RADIUS*0.15=6.3)이었는데 이 섬의 ANCHOR 지면 높이는 13.1이라
+  //   실제로는 지면보다 7m 아래를 조준하고 있었다 — 그래서 화면 아래 40%가 텅 빈 지면이고 중앙 건물은
+  //   위로 잘려나갔다. 지면 높이 기준으로 잡고, 건물 중간쯤을 화면 중앙에 둔다.
+  const groundY = groundAt(ANCHOR.x, ANCHOR.z) ?? 0;
+  const focusY = groundY + Math.max(4, buildSiteHeight * 0.45);
+  camera.position.set(ANCHOR.x + horiz*Math.sin(yawRad), focusY + height, ANCHOR.z + horiz*Math.cos(yawRad)); // 35.264° 피치 + 45° 요(대각선)
+  controls.target.set(ANCHOR.x, focusY, ANCHOR.z);
+  // ★하한이 기본 거리보다 크면 controls가 매 프레임 카메라를 밖으로 밀어내 구도가 어긋난다(FOV를 넓히며
+  //   기본 거리가 42→약 39로 줄었으므로 하한도 같이 낮춘다).
+  controls.minDistance = ACTIVITY_RADIUS*0.6;
+  controls.maxDistance = ISLAND_RADIUS*4;
+  camera.lookAt(controls.target);
+  controls.update();
+  scene.fog.near = Math.max(ACTIVITY_RADIUS*2.4, ISLAND_RADIUS*0.7);
+  scene.fog.far = ISLAND_RADIUS * 5.5;
+  // 태양 그림자 프러스텀 — 이 대시보드는 카메라가 ANCHOR 근처 고정이라(real game처럼 플레이어 추종 불필요)
+  // ANCHOR 중심으로 활동반경만 넉넉히 덮으면 된다.
+  sun.target.position.set(ANCHOR.x, groundY, ANCHOR.z);
+  sun.position.set(ANCHOR.x + 20, groundY + 40, ANCHOR.z + 10);
+  const SR = ACTIVITY_RADIUS * 1.4;
+  const sc = sun.shadow.camera;
+  // ★22차(하늘 이식): sky.js가 태양을 ANCHOR에서 500 거리에 놓으므로 far 200으로는 그림자가 아예 안 잡힌다.
+  sc.near = 50; sc.far = 1200; sc.left = -SR; sc.right = SR; sc.top = SR; sc.bottom = -SR;
+  sc.updateProjectionMatrix();
+  // ★하늘 이식(2026-08-10): nightsky 하늘 돔은 반경 6500, sky.js 구름 돔은 5000, 별은 4000이다
+  //   (게임 core.js 카메라 far=8000 기준으로 설계된 값). 기존 far(ISLAND_RADIUS*10≈3150)로는 하늘·구름·해가
+  //   통째로 클리핑돼 배경색만 보였다 — 게임과 같은 8000을 하한으로 둔다.
+  camera.far = Math.max(8000, ISLAND_RADIUS * 10);
+  camera.updateProjectionMatrix();
+  // 타겟 지점에서 화면 좌우 절반이 덮는 월드 거리 = dist*tan(fov/2)*aspect. 초광폭 창에서 배치가 과하게
+  // 퍼지지 않게 aspect는 1.9에서 자른다. 0.82는 화면 가장자리에 워커가 반쯤 걸치지 않게 두는 여유.
+  const halfW = dist * Math.tan(THREE.MathUtils.degToRad(camera.fov)/2) * Math.min(camera.aspect, 1.9);
+  FRAME_R = Math.max(12, halfW * 0.82);
+  // 화면 상하(=지면 깊이 방향)는 카메라가 지면을 비스듬히 보므로 좌우보다 훨씬 넓게 담긴다 — 세로 모니터일수록
+  // 그 여유가 커진다. 배치를 이 비율의 타원으로 돌려야 캐릭터를 키운 채로 전원 프레임에 넣을 수 있다.
+  // ★피치를 15°로 눕히면서 상한을 낮췄다 — 낮은 각도에서는 깊이 방향이 화면에서 심하게 압축돼,
+  //   예전 배율(최대 2.6)로 깔면 앞뒤 워커가 서로 겹쳐 보인다.
+  DEPTH_GAIN = Math.min(1.45, Math.max(1, 1.25 / camera.aspect));
+  camera.getWorldDirection(CAM_FWD); CAM_FWD.y = 0; CAM_FWD.normalize();
+  CAM_RIGHT.set(-CAM_FWD.z, 0, CAM_FWD.x);
+  const oceanNeed = Math.max(1, (ISLAND_RADIUS*5) / 700);
+  ocean.mesh.scale.set(oceanNeed, 1, oceanNeed);
+  window.__frame = { dist, aspect:camera.aspect, FRAME_R }; // 디버그 훅
+}
+// 어떤 지면 좌표가 실제로 지금 화면 안에 잡히는지 투영으로 직접 판정(계산 가정이 아니라 실제 카메라 행렬 기준).
+const _framePv = new THREE.Vector3();
+function inFrame(x, z, margin){
+  const y = groundAt(x, z);
+  _framePv.set(x, (y == null ? 0 : y) + 1.6, z).project(camera);
+  const m = margin == null ? 0.88 : margin;
+  return Math.abs(_framePv.x) < m && Math.abs(_framePv.y) < m && _framePv.z < 1;
+}
+
+// ★사령관 지적(2026-08-08 "섬 바닥 실제로 저 색깔 아닌데?") — codex/tomob `modules/core.js`의 실제 조명값과
+//   대조해보니 hemi 지면색이 훨씬 어두웠고(0x1a1f14 거의 검정 vs 실제 0x6f8a99) sun 광량도 거의 절반(0.9 vs 1.6)
+//   이었다. 지형 텍스처 자체가 아니라 조명이 부족해서 칙칙/회색으로 보인 것 — core.js 값 그대로 이식.
+const hemi = new THREE.HemisphereLight(0xffffff, 0x6f8a99, 1.15);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff0d8, 1.6);
+sun.position.set(20, 40, 10);
+scene.add(sun);
+// 그림자도 real game과 동일하게 core.js에서 켜져 있는데(castShadow=true 이식 코드는 많음) 이 대시보드는
+// renderer.shadowMap 자체가 꺼져 있어 전부 죽은 코드였다(정확히 real game이 예전에 겪은 것과 같은 버그).
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.localClippingEnabled = true; // 건설 게이지(아래에서 차오르는 절단면)가 이 옵션 없이는 동작하지 않는다
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+scene.add(sun.target);
+// ★sky.js가 시간대 곡선으로 함께 조절하는 보조광 — 실제 게임 core.js에도 같은 역할로 존재한다.
+//   fill = 태양 반대편에서 역광면을 들어올리는 약한 방향광, amb = 캐노피 아랫면이 검게 죽는 걸 막는 최소 환경광.
+const fill = new THREE.DirectionalLight(0xbcd3ff, 0.0);
+scene.add(fill);
+const amb = new THREE.AmbientLight(0xffffff, 0.0);
+scene.add(amb);
+
+// ══ 게임 모듈(sky.js / nightsky.js)이 기대하는 최소 ctx 셰임 ══
+//   실제 게임의 ctx는 훨씬 크지만 이 두 모듈이 실제로 쓰는 건 아래가 전부다(코드 확인 후 최소로 구성).
+//   ctx.player/wind/dungeon은 없으므로 두 모듈의 해당 분기는 자동으로 "평지·맑음·던전 아님"으로 흐른다.
+const _updaters = [];
+const ctx = {
+  scene, camera, renderer, sun, hemi, fill, amb,
+  onUpdate(fn){ _updaters.push(fn); },
+};
+window.__ctx = ctx; // 디버그 훅
+
+// ══ 실제 게임(codex/tomob)의 섬 에셋을 그대로 로드 ══
+// 사령관이 직접 만든 홈 세션(voyage_islands_backup.json "시작의섬 카브")의 실제 배치 그대로 재현 —
+// terrain.js 세션 포맷({objs:[{url,x,y,z,rotY,scale}]})의 좌표를 그대로 사용, 임의 재배치 없음.
+const REAL = './assets/real/';
+const collide = []; // terrain.js의 collide 배열과 동일한 역할 — groundAt이 이 목록만 레이캐스트
+let ISLAND_RADIUS = 30; // 전체(본섬+산) 실측 반경 — 안개/바다 크기 기준
+let ATOLL_RADIUS = 30;  // 본섬(환초)만의 실측 반경 — Sea Keep 크기·라군 위치 기준
+let ANCHOR = { x: 0, z: 0 }; // 카메라·워커가 실제로 모이는 육지 위 기준점(원점=라군이라 원점 자체는 못 씀)
+let LAGOON_CENTER = { x: 0, z: 0 }; // 본섬(환초)의 라군 한가운데 — Sea Keep 배치 기준
+let ATOLL_ROOT = null; // 본섬 FBX 루트 — environment.js식 나무/잔디 배치의 bbox 기준
+let MOUNTAINS = []; // {x,z,r} 산 footprint — environment.js와 동일하게 광석 링 배치 기준
+const ACTIVITY_RADIUS = 42;  // ANCHOR 주변 반경 — "움직이는 걸 보여주는" 클로즈업 활동 범위(전체 섬 크기와 무관하게 고정)
+
+const _groundRay = new THREE.Raycaster();
+_groundRay.firstHitOnly = true;
+function groundAt(x, z, fromY){
+  _groundRay.set(new THREE.Vector3(x, fromY==null?800:fromY, z), new THREE.Vector3(0,-1,0));
+  const hh = _groundRay.intersectObjects(collide, true);
+  return hh.length ? hh[0].point.y : null; // null = 이 지점엔 섬 메시가 없다(라군/바깥바다 위 허공)
+}
+// ★실제 이 섬(CPT_Island_H_a_06)은 가운데가 뚫린 환초(atoll) 형태 — 중앙에 라군(물)이 있어
+//   원점 기준 단순 반경식으로 좌표를 잡으면 육지가 아니라 라군 위에 스폰된다("캐릭터가 바다에 있음" 원인).
+//   groundAt이 null(메시 없음)이거나 해수면(y=0) 근처/아래(라군 바닥)면 육지가 아닌 것으로 판정한다.
+// ★근본 원인(2026-08-08, 세 번째 지적): 0.3은 내가 임의로 정한 값이었다 — 실제 environment.js는 WATER_Y=2.0을
+//   쓴다(파도 진폭이 1.5~2유닛대라 0.3은 파도가 계속 넘나드는 마진). 실제 상수로 교체.
+const WATER_LEVEL = 2.0;
+function isLandAt(x, z){
+  const y = groundAt(x, z);
+  return (y != null && y > WATER_LEVEL) ? y : null;
+}
+// 목표 지점이 물이면 골든앵글 나선으로 주변을 훑어 가장 가까운 실제 육지를 찾는다(결정적 — 새로고침해도 동일 결과).
+function findLandNear(x0, z0, maxTries){
+  let y = isLandAt(x0, z0);
+  if (y != null) return { x:x0, z:z0, y };
+  maxTries = maxTries || 60;
+  for (let i=1; i<=maxTries; i++){
+    const ang = i * 2.399963; // 골든 앵글 — 나선형으로 고르게 탐색
+    const rad = Math.sqrt(i) * (ATOLL_RADIUS*0.05);
+    const x = x0 + Math.cos(ang)*rad, z = z0 + Math.sin(ang)*rad;
+    y = isLandAt(x, z);
+    if (y != null) return { x, z, y };
+  }
+  return { x:0, z:0, y:1 }; // 사실상 발생 안 함(섬 전체가 물일 때만)
+}
+// ★사령관이 실제 게임을 직접 켜서 확인해보라고 지시(2026-08-08) — ANCHOR(카메라 기본 시점·건설 현장
+// 중심)를 실측해보니 반경 30m 안이 64%가 모래/황토 쿼드런트였다(섬 전체 평균은 76% 초록인데도). 기존
+// findLandNear는 "물만 아니면" 통과라 우연히 백사장 근처에 꽂혀도 못 걸러냈다. 초록(잔디 자생 가능) 땅을
+// 우선 찾는 버전 — 실패하면 findLandNear처럼 육지면 뭐든 받는다(섬 전체가 모래뿐일 때 대비).
+// 초록(잔디 자생 가능)이면서 실제로 걸을 수 있는 완만한 땅인지 — 초록 지점 탐색과 초록 비율 평가가 같이 쓴다.
+function isGreenWalkableAt(x, z){
+  // ★22차: 21차에 산 제외를 0.6배로 좁혔던 건 flipY 버그 때문에 "초록 판정이 산 발치에만 나던" 상태에
+  //   맞춘 임시 대응이었다. 버그를 고치고 섬 전체가 정상 초록이 된 지금은 산에서 넉넉히 떨어져도 초록을
+  //   찾을 수 있으므로, 산 사면이 화면을 가리지 않게 다시 넓게(1.1배) 제외한다.
+  if (MOUNTAINS.some(m => { const dx=x-m.x, dz=z-m.z; return dx*dx+dz*dz < (m.r*1.1)*(m.r*1.1); })) return null;
+  const h = groundHit(x, z);
+  if (!h || h.point.y <= WATER_LEVEL || !isGreenAt(h)) return null;
+  const nr = h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld) : null;
+  if (nr && nr.y < 0.75) return null; // 완만한 경사만
+  return h.point.y;
+}
+function findGreenLandNear(x0, z0, maxTries){
+  maxTries = maxTries || 250;
+  // ★v플립 버그를 고친 뒤 그리드로 실측해보니(2026-08-08), 이 섬(카브)에서 초록(잔디 자생) 판정이
+  // 나는 땅은 대부분 산 발치 근처에 몰려 있었다(environment.js의 "산 링" 나무·광물 배치와 같은 이유).
+  // 처음엔 산 반경*1.05를 통째로 제외했더니 그 초록 밀집 지대까지 다 걸러져서 탐색이 계속 실패했다 —
+  // 산 자체(가파른 봉우리)만 좁게 제외(0.4배)하고, 완만한 경사(0.75 이상)인지로 실제 걸을 수 있는
+  // 땅인지를 가른다. 산에 아주 바짝 붙지만 않으면 오히려 이 근방이 가장 초록이 짙은 지대다.
+  const check = isGreenWalkableAt;
+  let y = check(x0, z0);
+  if (y != null) return { x:x0, z:z0, y };
+  // ★ATOLL_RADIUS 비례 스텝(0.2배)은 이 세션(ATOLL_RADIUS≈410)에서 첫 스텝부터 82유닛이라 너무 성겨서
+  // 근처(불과 42유닛 거리)의 초록 지대를 건너뛰고 250번을 다 실패해 계속 폴백했다 — 콘솔로 절대 스텝
+  // 10유닛을 직접 실험해보니 21번 만에 바로 찾아졌다. 섬 크기와 무관하게 일정한 절대 스텝으로 변경.
+  const STEP = 10;
+  for (let i=1; i<=maxTries; i++){
+    const ang = i * 2.399963, rad = Math.sqrt(i) * STEP;
+    const x = x0 + Math.cos(ang)*rad, z = z0 + Math.sin(ang)*rad;
+    y = check(x, z);
+    if (y != null) return { x, z, y };
+  }
+  return findLandNear(x0, z0); // 초록 땅을 못 찾으면 기존 방식으로 폴백
+}
+// ★사령관 반복 지적("섬 바닥 컬러 저거 아니라니까")의 남은 절반(2026-08-08, 22차): 렌더 버그(20차)와 ANCHOR
+//   이동(21차)까지 고쳤는데도 화면 대부분이 회색이었던 이유 — findGreenLandNear는 "초록인 **첫** 지점"에서
+//   멈추므로 초록 지대의 가장자리(회색과 맞닿은 경계)에 앵커가 꽂혔다. 카메라가 담는 건 점이 아니라 면적이니,
+//   후보를 여러 개 모아 각자 **주변 면적의 초록 비율**을 재고 가장 높은 곳을 고른다.
+const GREEN_EVAL_R = ACTIVITY_RADIUS * 0.55;
+function greenRatioAround(cx, cz){
+  let green = 0, total = 0;
+  for (let i=0; i<26; i++){
+    const ang = i * 2.399963, rad = Math.sqrt(i/26) * GREEN_EVAL_R;
+    const x = cx + Math.cos(ang)*rad, z = cz + Math.sin(ang)*rad;
+    const h = groundHit(x, z);
+    total++;
+    if (h && h.point.y > WATER_LEVEL && isGreenAt(h)) green++;
+  }
+  return total ? green/total : 0;
+}
+// ★22차: 섬이 정상 초록으로 돌아오자 "초록 비율 최고"인 지점이 산 중턱으로 잡혀 카메라가 산 사면에 파묻혔다
+//   (21차에 이미 경고됐던 부작용). fitCameraToAnchor와 **같은 공식**으로 카메라 위치를 미리 계산해서
+//   시선이 지형에 막히는 후보는 아예 탈락시킨다 — 각도 상수를 여기서 따로 추정하지 않는 게 핵심.
+const _blockRay = new THREE.Raycaster();
+_blockRay.firstHitOnly = true;
+function cameraViewBlockedAt(ax, az){
+  const dist = camDistance();
+  const pitchRad = THREE.MathUtils.degToRad(PITCH_DEG), yawRad = THREE.MathUtils.degToRad(YAW_DEG);
+  const horiz = dist * Math.cos(pitchRad), height = dist * Math.sin(pitchRad);
+  const gy = groundAt(ax, az) ?? 0;
+  const focusY = gy + Math.max(4, buildSiteHeight * 0.45);
+  const camPos = new THREE.Vector3(ax + horiz*Math.sin(yawRad), focusY + height, az + horiz*Math.cos(yawRad));
+  const camGround = groundAt(camPos.x, camPos.z);
+  if (camGround != null && camPos.y < camGround + 6) return true; // 카메라가 지형에 파묻힘
+  const target = new THREE.Vector3(ax, focusY, az);
+  const dir = target.clone().sub(camPos); const len = dir.length(); dir.normalize();
+  _blockRay.set(camPos, dir); _blockRay.near = 0.5; _blockRay.far = Math.max(1, len - 3);
+  return _blockRay.intersectObjects(collide, true).length > 0;
+}
+function findGreenBasinNear(x0, z0){
+  const cands = [];
+  if (isGreenWalkableAt(x0, z0) != null) cands.push({ x:x0, z:z0 });
+  const STEP = 10;
+  for (let i=1; i<=250 && cands.length < 14; i++){
+    const ang = i * 2.399963, rad = Math.sqrt(i) * STEP;
+    const x = x0 + Math.cos(ang)*rad, z = z0 + Math.sin(ang)*rad;
+    if (isGreenWalkableAt(x, z) != null) cands.push({ x, z });
+  }
+  if (!cands.length) return findLandNear(x0, z0);
+  // 카메라 시야가 지형에 막히지 않는 후보를 우선 — 전부 막히면(좁은 섬 등) 어쩔 수 없이 전체에서 고른다.
+  const open = cands.filter(c => !cameraViewBlockedAt(c.x, c.z));
+  const pool = open.length ? open : cands;
+  let best = pool[0], bestRatio = -1;
+  for (const c of pool){ const r = greenRatioAround(c.x, c.z); if (r > bestRatio){ bestRatio = r; best = c; } }
+  console.log('[agentview] ANCHOR 선정 — 후보 '+cands.length+'개(시야 트인 곳 '+open.length+'개) 중 주변 초록 비율 '+(bestRatio*100).toFixed(0)+'%인 지점');
+  return { x: best.x, z: best.z, y: groundAt(best.x, best.z) ?? 0 };
+}
+// findLandNear는 "그 점 하나"만 육지면 통과라 해안선 바로 옆(물이 바짝 붙은 자리)도 잡힐 수 있다.
+// 랜드마크처럼 "완전히 물에서 떨어진 내륙"이 필요한 경우 후보 주변 buffer 반경 전체가 육지인지까지 확인한다.
+// ★버퍼 링/격자 체크를 계속 키워도 실패했다(2026-08-08, 사령관 네 번 지적) — 실측 결과 그 지점들은
+//   "체크한 반경 안은 육지"였지만 바로 그 반경 밖(본섬-옆산 사이 해협)이 커다란 물이었다. 고정 반경
+//   안전판 대신, 넓은 영역을 격자로 훑어 "가장 가까운 물까지 거리가 최대"인 지점(=진짜 가장 깊은 내륙)을
+//   직접 찾는다 — 지형이 어떻게 생겼든 이 방식은 항상 그 탐색 범위 안에서 최선의 지점을 고른다.
+// ★진짜 근본 원인(2026-08-08, 다섯 번째 확인): WATER_LEVEL(2.0)을 넘겨도 "겨우 2~4유닛" 높이의 지형은
+//   바다 셰이더의 파도 변위(진폭 최대 ~3유닛)가 그 위를 계속 덮친다 — 숫자로는 '육지'인데 파도가 넘실대며
+//   물에 잠긴 것처럼 보이는 원인. 랜드마크는 파도가 절대 안 닿을 만큼 훨씬 높은 지대(minY)만 인정한다.
+function isRobustLandAt(x, z, minY){
+  const y = groundAt(x, z);
+  return (y != null && y > minY) ? y : null;
+}
+// ★진짜 진짜 진짜 근본 원인(2026-08-08, 실측 raycast로 최종 확인): Sea Keep의 바위 밑동 자체가
+//   아치·동굴처럼 구멍이 숭숭 뚫린 형태(원본 에셋 컨셉 자체가 "바다에서 솟은 바위섬")라, 육지가 해수면에서
+//   조금만 높아도(4~8유닛) 그 틈으로 바다가 계속 비쳐 보인다. 육지 판정이 아니라 "충분히 높은 지대"가 필요.
+function findHighestPoint(cx, cz, radius, gridN){
+  radius = radius || 90; gridN = gridN || 20;
+  let best = null, bestY = -Infinity;
+  for (let i=0; i<gridN; i++){
+    for (let j=0; j<gridN; j++){
+      const x = cx - radius + (i/(gridN-1))*radius*2;
+      const z = cz - radius + (j/(gridN-1))*radius*2;
+      const y = groundAt(x, z);
+      if (y != null && y > bestY){ bestY = y; best = { x, z, y }; }
+    }
+  }
+  return best || { x:cx, z:cz, y:0 };
+}
+function findDeepestInland(cx, cz, radius, gridN, maxCheckR, minY){
+  radius = radius || 90; gridN = gridN || 22; maxCheckR = maxCheckR || 70; minY = minY || 8;
+  let best = null, bestDist = -1;
+  for (let i=0; i<gridN; i++){
+    for (let j=0; j<gridN; j++){
+      const x = cx - radius + (i/(gridN-1))*radius*2;
+      const z = cz - radius + (j/(gridN-1))*radius*2;
+      if (isRobustLandAt(x, z, minY) == null) continue;
+      let minWaterDist = maxCheckR;
+      outer: for (let k=0; k<8; k++){
+        const a = (k/8)*Math.PI*2;
+        for (let r=7; r<=maxCheckR; r+=7){
+          if (isRobustLandAt(x+Math.cos(a)*r, z+Math.sin(a)*r, minY) == null){ minWaterDist = Math.min(minWaterDist, r); continue outer; }
+        }
+      }
+      if (minWaterDist > bestDist){ bestDist = minWaterDist; best = { x, z }; }
+    }
+  }
+  return best || findLandNear(cx, cz);
+}
+
+// 카브 세션 원본 objs 그대로(voyage_islands_backup.json). Cloud_03.fbx(장식 구름)와 700유닛 이상
+// 떨어진 두 번째 소형섬(CPT_Island_H_a_05)은 이 대시보드 화면 밖이라 제외 — 본섬+옆 산만.
+const HOME_PIECES = [
+  { file: 'CPT_Island_H_a_06.fbx',  x:200, y:0,                      z:225, rotY:0, scale:1.5019390107937132, isAtoll:true },
+  { file: 'CPT_Mountain_L_a_14.fbx', x:400, y:12.802610561580666,     z:225, rotY:0, scale:2.4903585024906376 },
+];
+
+// ══ 실제 게임 environment.js와 동일한 아틀라스 색 샘플 — 초록(잔디)에만 나무/잔디 배치, 회색·모래는 제외 ══
+let _atlasCanvas = null;
+function loadAtlasCanvas(url){
+  return new Promise(res => {
+    const im = new Image();
+    im.onload = () => { try {
+      const cv = document.createElement('canvas'); cv.width = im.width; cv.height = im.height;
+      const cx = cv.getContext('2d', { willReadFrequently: true }); cx.drawImage(im, 0, 0);
+      _atlasCanvas = { cx, w: cv.width, h: cv.height };
+    } catch (e) {} res(); };
+    im.onerror = () => res();
+    im.src = url;
+  });
+}
+function isGreenAt(hit){
+  if (!_atlasCanvas || !hit || !hit.uv) return true;
+  let u = hit.uv.x - Math.floor(hit.uv.x), v = hit.uv.y - Math.floor(hit.uv.y);
+  // ★22차: 렌더 텍스처를 flipY=true(실제 게임과 동일)로 되돌렸으므로 판정도 같은 규칙이어야 한다 —
+  //   v=0이 이미지의 아래쪽에 대응하니 캔버스 픽셀 좌표(위가 0)로 바꾸려면 v를 뒤집는다.
+  //   즉 environment.js 원본의 v=1-v가 처음부터 옳았고, 20차에서 그걸 뺀 것이 오진이었다.
+  v = 1 - v;
+  const px = Math.min(_atlasCanvas.w-1, Math.max(0, (u*_atlasCanvas.w)|0));
+  const py = Math.min(_atlasCanvas.h-1, Math.max(0, (v*_atlasCanvas.h)|0));
+  const d = _atlasCanvas.cx.getImageData(px, py, 1, 1).data;
+  return d[1] > d[0]+8 && d[1] > d[2]+14 && d[1] > 60;
+}
+// groundAt과 별개로 full intersection(uv·face·object 포함)이 필요한 배치 로직용 — environment.js의 groundAt(reader) 대응.
+function groundHit(x, z, meshes){
+  _groundRay.set(new THREE.Vector3(x, 800, z), new THREE.Vector3(0,-1,0));
+  const hh = _groundRay.intersectObjects(meshes || collide, true);
+  return hh.length ? hh[0] : null;
+}
+
+async function loadHomeIsland(){
+  const tl = new THREE.TextureLoader();
+  let atlas = tl.load(REAL + 'island/Textures/CPT_Terrain_Texture_Atlas_01.png');
+  atlas.colorSpace = THREE.SRGBColorSpace;
+  // ★★ 지형이 회색이던 진짜 원인(2026-08-08, 22차 — 실제 게임 `_islandview.html`과 나란히 띄워 대조해서 확정):
+  //   flipY를 false로 뒀던 것. 실제 게임은 FBX 로더가 FBX에 딸린 텍스처를 로드하고 그 텍스처는 three 기본값
+  //   flipY=true다. false로 두면 UV의 v가 뒤집혀 초록 사분면 대신 회색/모래 사분면을 샘플링한다 —
+  //   같은 섬(카브)이 게임 뷰어에선 온통 초록인데 여기선 온통 회색이던 이유가 정확히 이것.
+  //   16차(조명)·19차(잔디 크기)·20차(emissive/specular/UV플립)에서 각각 다른 원인을 지목했지만 전부
+  //   부분 원인이거나 오진이었고, flipY 한 줄을 true로 바꾸자 게임 뷰어와 같은 그림이 나왔다.
+  atlas.flipY = true;
+  await loadAtlasCanvas(REAL + 'island/Textures/CPT_Terrain_Texture_Atlas_01.png');
+  // ★사령관이 실제 게임(codex/tomob)을 직접 켜서 확인해보라고 지시(2026-08-08) — 직접 켜서 보니 바닥이
+  // 뚜렷한 초록이었다. 원본 아틀라스(64×64, 4색 팔레트)를 Python으로 실측하니 "초록" 칸이 실제로는
+  // (146,197,89) — G가 R보다 조금 높은 정도의 칙칙한 카키색이라 isGreenAt() 배치 판정(임계값만 넘으면
+  // 통과)엔 걸리지만 육안으로는 회색/황토와 잘 구분이 안 된다. 실제 게임은 이 위에 촘촘한 잔디 블레이드가
+  // 늘 화면을 가득 채워서 이 칙칙한 바탕이 거의 안 보이는데, 이 대시보드는 카메라가 훨씬 멀고 유저가
+  // 직접 줌아웃도 가능해서(잔디 블레이드가 서브픽셀로 사라짐) 이 칙칙한 원색이 그대로 드러난다.
+  // 배치 판정(_atlasCanvas, isGreenAt)은 원본 그대로 두고, "화면에 실제로 그려지는" 텍스처만 초록 칸을
+  // 더 선명한 초록으로 다시 칠한 사본을 만들어 쓴다 — 원본 파일은 안 건드림, 자산 대체가 아니라 렌더 보정.
+  if (_atlasCanvas) {
+    const vc = document.createElement('canvas'); vc.width = _atlasCanvas.w; vc.height = _atlasCanvas.h;
+    const vcx = vc.getContext('2d'); vcx.drawImage(_atlasCanvas.cx.canvas, 0, 0);
+    const img = vcx.getImageData(0, 0, vc.width, vc.height);
+    const d = img.data;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i+1] > d[i]+8 && d[i+1] > d[i+2]+14 && d[i+1] > 60) { d[i]=88; d[i+1]=150; d[i+2]=56; }
+    }
+    vcx.putImageData(img, 0, 0);
+    atlas = new THREE.CanvasTexture(vc);
+    atlas.colorSpace = THREE.SRGBColorSpace;
+    atlas.flipY = true; // 위 원본 아틀라스와 동일 규칙(캔버스도 이미지 방향 그대로 그렸으므로 같은 값이어야 한다)
+    // ★64×64에 딱 4개의 넓은 단색 사분면뿐인 텍스처라, 대시보드처럼 카메라가 멀어지면 GPU 밉맵 축소가
+    // 인접 사분면(초록·회색·황토·흰색)을 뭉개서 평균 낸 칙칙한 회갈색으로 보인다(실측: 화면 픽셀이 atlas
+    // 원본 4색 어디에도 안 맞고 그 사이 애매한 값으로 나옴). 밉맵을 꺼서 항상 또렷한 원색이 나오게 한다.
+    atlas.generateMipmaps = false;
+    atlas.minFilter = THREE.LinearFilter;
+    atlas.magFilter = THREE.LinearFilter;
+  }
+
+  const cx = (HOME_PIECES[0].x + HOME_PIECES[1].x) / 2;
+  const cz = (HOME_PIECES[0].z + HOME_PIECES[1].z) / 2;
+
+  const fbxL = new FBXLoader();
+  fbxL.setResourcePath(REAL + 'island/Textures/');
+  const group = new THREE.Group();
+  let atollLocal = { x: 0, z: 0 };
+  for (const piece of HOME_PIECES) {
+    const root = await new Promise((res, rej) => fbxL.load(REAL + 'island/Meshes/' + piece.file, res, undefined, rej));
+    root.scale.setScalar(0.01 * piece.scale); // ★terrain.js와 동일 0.01 보정 + 카브 세션에 저장된 개별 배율 그대로
+    root.position.set(piece.x - cx, piece.y, piece.z - cz); // 카브 세션 원 배치(중심만 원점 근처로 재정렬, 상대거리는 원본 그대로)
+    root.rotation.y = piece.rotY || 0;
+    root.traverse(o => {
+      if (!o.isMesh) return;
+      o.castShadow = true; o.receiveShadow = true;
+      o.geometry.computeBoundsTree();
+      // ★이 FBX의 임베드 머티리얼이 실존하지 않는 'colormap.png'를 참조(원본 에셋의 죽은 링크) →
+      //   조건부(!m.map)로는 걸러지지 않아 무조건 실제 아틀라스로 덮어쓴다.
+      // ★사령관이 실제 게임 켜서 확인해보라고 지시(2026-08-08) — 진짜 원인 발견: 이 FBX가 임포트될 때
+      //   MeshPhongMaterial의 emissive가 흰색(0xffffff)으로 들어와 있었다. emissive는 조명과 무관하게
+      //   그 색 그대로 더해지므로, 조명·아틀라스 색이 다 맞아도 흰색이 계속 얹혀 전체가 창백/회색으로
+      //   보인 것(직접 raycast로 UV가 정확히 초록 사분면을 가리키는데도 렌더 픽셀은 베이지였던 이유).
+      //   나무 프로토(loadTreeProtos)에서는 이미 emissive를 0으로 꺼주고 있었는데 섬 지형 쪽만 빠져있었다.
+      //   emissive를 꺼도 여전히 회색이길래 재조사 — MeshPhongMaterial의 specular도 흰색(0xffffff)에
+      //   shininess 9.6(낮음=넓게 퍼지는 하이라이트)으로 들어와 있었다. 로우폴리 지형 전체 면적에 걸쳐
+      //   두 광원(hemi+sun) 하이라이트가 넓게 퍼져 덮이면서 색을 하얗게 씻어내고 있었던 것 — 이게 진짜
+      //   마지막 원인. 잔디/땅은 매트 표면이어야 하므로 specular도 꺼서 정반사 자체를 없앤다.
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      mats.forEach(m => { if (m) { m.map = atlas; if (m.color) m.color.set(0xffffff); if (m.emissive) m.emissive.set(0x000000); if (m.specular) m.specular.set(0x000000); m.needsUpdate = true; } });
+    });
+    group.add(root);
+    collide.push(root);
+    if (piece.isAtoll) {
+      atollLocal = { x: piece.x - cx, z: piece.z - cz };
+      const abb = new THREE.Box3().setFromObject(root);
+      const asize = new THREE.Vector3(); abb.getSize(asize);
+      ATOLL_RADIUS = Math.max(6, Math.max(asize.x, asize.z) / 2 * 0.85);
+      ATOLL_ROOT = root;
+    } else {
+      // environment.js와 동일: 산 footprint(중심+반경) — 광석 링 배치·나무 배제 기준
+      const mbb = new THREE.Box3().setFromObject(root);
+      const msize = new THREE.Vector3(); mbb.getSize(msize);
+      const mcenter = new THREE.Vector3(); mbb.getCenter(mcenter);
+      MOUNTAINS.push({ x: mcenter.x, z: mcenter.z, r: Math.max(msize.x, msize.z) * 0.5 });
+    }
+  }
+  scene.add(group);
+
+  const bb = new THREE.Box3().setFromObject(group);
+  const size = new THREE.Vector3(); bb.getSize(size);
+  ISLAND_RADIUS = Math.max(6, Math.max(size.x, size.z) / 2 * 0.85);
+
+  // ★findGreenLandNear 산 제외 반경을 완화(0.4배)하고 나니(위 함수 주석 참고) 실제로 초록 지대를 찾아냄
+  // — 산에서 아주 바짝 붙지만 않으면 산 발치 근방이 이 섬에서 가장 잔디가 짙은 곳이었다.
+  const anchorSeed = findGreenBasinNear(atollLocal.x + ATOLL_RADIUS * 0.25, atollLocal.z);
+  ANCHOR = { x: anchorSeed.x, z: anchorSeed.z };
+  LAGOON_CENTER = atollLocal;
+
+  console.log('[agentview] 실제 홈 섬("시작의섬 카브") 로드 완료 — 전체 반경≈'+ISLAND_RADIUS.toFixed(1)+'m, 활동거점('+ANCHOR.x.toFixed(0)+','+ANCHOR.z.toFixed(0)+')');
+  islandReady = true;
+  fitCameraToAnchor();
+  window.__islandGroup = group; window.__atlas = atlas; window.__THREE = THREE; window.__anchor = ANCHOR; // 디버그 훅
+  window.__mountains = MOUNTAINS; window.__groundHit = groundHit; window.__isGreenAt = isGreenAt; window.__findGreenLandNear = findGreenLandNear; window.__atollLocal = atollLocal;
+  return ISLAND_RADIUS;
+}
+
+// ══ 실제 게임의 바다(water.js) 코어를 이식 — 같은 파도 스펙트럼·노멀맵·프레넬·SSS·거품 셰이더.
+//   날씨/밤/배웨이크/하늘반사프로브 등 다른 시스템에 종속된 부분은 이 대시보드엔 없어서 제외(항상 맑은 낮 고정). ──
+function buildRealOcean(){
+  const tl = new THREE.TextureLoader();
+  const wl = u => { const t = tl.load(u); t.wrapS = t.wrapT = THREE.RepeatWrapping; return t; };
+  const WAVES = [
+    {a:0.42,f:0.011,A:1.55,s:0.30}, {a:2.61,f:0.016,A:1.70,s:0.36}, {a:4.53,f:0.009,A:1.25,s:0.26},
+    {a:1.15,f:0.042,A:1.45,s:0.58}, {a:3.34,f:0.058,A:1.15,s:0.70}, {a:5.41,f:0.035,A:1.25,s:0.52}, {a:0.87,f:0.078,A:0.75,s:0.85},
+    {a:3.92,f:0.105,A:0.42,s:1.00}, {a:2.08,f:0.130,A:0.32,s:1.15}, {a:5.90,f:0.155,A:0.26,s:1.25}, {a:4.77,f:0.185,A:0.22,s:1.40}, {a:1.63,f:0.235,A:0.14,s:1.60},
+  ];
+  const _wg = (() => { const P=[],AM=[],H=[],SX=[],SZ=[];
+    WAVES.forEach((w,i) => { const c=Math.cos(w.a), s=Math.sin(w.a), kx=+(c*w.f).toFixed(6), kz=+(s*w.f).toFixed(6), sc=w.f<0.10?'uSwell':'uWaveAmp';
+      P.push(`float p${i}=${kx}*x+${kz}*z+uTime*${w.s.toFixed(3)};`);
+      AM.push(`float A${i}=${w.A.toFixed(3)}*${sc};`);
+      H.push(`sin(p${i})*A${i}`); SX.push(`cos(p${i})*A${i}*${kx}`); SZ.push(`cos(p${i})*A${i}*${kz}`);
+    });
+    return { pre:P.join('')+AM.join(''), h:H.join('+'), sx:SX.join('+'), sz:SZ.join('+') };
+  })();
+
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime:{value:0}, uWaveAmp:{value:1.0}, uSwell:{value:1.05}, uWaveN:{value:30.0}, uFoam:{value:0.85},
+      uNormA:{value:wl(REAL+'water/water_normal_calm.png')}, uNormB:{value:wl(REAL+'water/water_normal_roll.png')}, uNormC:{value:wl(REAL+'water/water_normal_turb.png')},
+      uSunDir:{value:new THREE.Vector3(0.45,0.8,0.35).normalize()},
+      uShallow:{value:new THREE.Color(0x33cdba)}, uDeep:{value:new THREE.Color(0x0a5a6e)}, uSun:{value:new THREE.Color(0xfff0c8)},
+      uHorizonCol:{value:new THREE.Color(0xa6cbe8)},
+      uSSS:{value:1.0}, uSSSPow:{value:3.2}, uSSSCol:{value:new THREE.Color(0.16,0.92,0.78)},
+      // ★sky.js가 매 프레임 바다에 주입하는 값들(밤 정도·달 방향·폭풍). 이 대시보드의 바다 셰이더는 아직
+      //   이 값들을 실제로 쓰진 않지만, 선언이 없으면 sky.js가 그대로 크래시한다(원본 코드에 가드가 없음).
+      //   uSunDir·uHorizonCol은 이미 있어서 태양 방향과 수평선 색이 하늘과 자동으로 동기된다.
+      uNight:{value:0}, uMoonDir:{value:new THREE.Vector3(0,-1,0)}, uStorm:{value:0},
+    },
+    transparent:true, depthWrite:false, side:THREE.DoubleSide,
+    vertexShader:`uniform float uTime;uniform float uWaveAmp;uniform float uSwell;varying vec3 vWorld;varying vec3 vView;varying vec2 vSlope;varying float vWaveH;
+      void main(){vec4 wp=modelMatrix*vec4(position,1.0);float x=wp.x,z=wp.z;
+        ${_wg.pre}
+        float h=${_wg.h};
+        vWaveH=h; wp.y+=h;
+        float dx=${_wg.sx}; float dz=${_wg.sz}; vSlope=vec2(dx,dz);
+        vWorld=wp.xyz;vView=cameraPosition-wp.xyz;gl_Position=projectionMatrix*viewMatrix*wp;}`,
+    fragmentShader:`uniform float uTime;uniform sampler2D uNormA,uNormB,uNormC;uniform vec3 uSunDir,uShallow,uDeep,uSun,uHorizonCol;uniform float uWaveN,uFoam,uSSS,uSSSPow;uniform vec3 uSSSCol;
+      varying vec3 vWorld;varying vec3 vView;varying vec2 vSlope;varying float vWaveH;
+      vec2 sn(sampler2D t,vec2 uv){return texture2D(t,uv).xy*2.0-1.0;}
+      float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+      float vnoise(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.0-2.0*f);
+        float a=hash(i),b=hash(i+vec2(1,0)),c=hash(i+vec2(0,1)),d=hash(i+vec2(1,1));
+        return mix(mix(a,b,f.x),mix(c,d,f.x),f.y); }
+      void main(){
+        vec2 p=vWorld.xz;
+        vec2 d1=sn(uNormA,p*0.0431+vec2(uTime*0.021,uTime*0.013));
+        vec2 d2=sn(uNormB,p*0.0177-vec2(uTime*0.0107,uTime*0.0163));
+        vec2 d3=sn(uNormC,p*0.0833+vec2(-uTime*0.0241,uTime*0.0089));
+        vec3 N=normalize(vec3((d1.x+d2.x+d3.x*0.7) - vSlope.x*uWaveN, 6.0, (d1.y+d2.y+d3.y*0.7) - vSlope.y*uWaveN));
+        vec3 V=normalize(vView);
+        float fres=clamp(0.03+0.97*pow(1.0-max(0.0,dot(V,N)),3.5),0.0,1.0);
+        float depthF=pow(max(0.0,dot(V,vec3(0.0,1.0,0.0))),0.55);
+        vec3 base=mix(uDeep,uShallow,depthF);
+        vec3 col=mix(base,uHorizonCol,fres);
+        {
+          float back=pow(max(0.0, dot(V, -normalize(uSunDir))), uSSSPow);
+          float thin=smoothstep(0.15, 2.2, vWaveH + length(vSlope)*2.5);
+          col += uSSSCol*(uSSS*back*thin);
+        }
+        float sunSpec=pow(max(0.0,dot(reflect(-V,N),normalize(uSunDir))),140.0);
+        col+=uSun*sunSpec*1.8;
+        float crest=smoothstep(0.72, 2.15, vWaveH + length(vSlope)*4.2);
+        float fb = vnoise(p*0.85 + vec2(uTime*0.33,-uTime*0.21))*0.52 + vnoise(p*2.20 - vec2(uTime*0.48, uTime*0.29))*0.32;
+        float bub=smoothstep(0.46, 0.86, fb);
+        float distFade=1.0 - smoothstep(150.0, 640.0, length(vView));
+        float foam=clamp(crest*uFoam*bub*(0.28+0.72*distFade),0.0,0.88);
+        col=mix(col, vec3(0.86,0.91,0.95), foam);
+        gl_FragColor=vec4(col,mix(0.7,0.98,max(fres,foam)));
+      }`,
+  });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(700, 700, 140, 140).rotateX(-Math.PI/2), mat);
+  mesh.renderOrder = -1;
+  scene.add(mesh);
+  return { mat, mesh, update(dt){ mat.uniforms.uTime.value += dt; } };
+}
+const ocean = buildRealOcean();
+
+// ══ 실제 게임 랜드마크: Sea Keep "Lonely Watcher"(modules/seakeeptest.js와 동일 FBX+텍스처) — 섬 가운데 라군 위에 배치 ══
+const SEAKEEP = REAL + 'seakeep/';
+function seakeepMaterialsOf(mesh){ return (Array.isArray(mesh.material) ? mesh.material : [mesh.material]).filter(Boolean); }
+function seakeepIsBackdrop(mesh){
+  // 원본 FBX에 딸려오는 자체 하늘/바다 메시 제거 — 이 대시보드는 이미 실제 water.js 바다를 쓰고 있어서 겹치면 안 됨.
+  // ★사령관 지적(2026-08-08, "바다는 빼야함"): seakeeptest.js 원 로직은 mesh 자신의 이름만 검사한다.
+  //   실측(strings) 결과 이 FBX의 "Sea" Model/Material 노드가 부모 그룹에 붙어 있어(자식 메시 이름은 빈값/generic)
+  //   원 로직으로는 안 걸러졌다 — 부모 체인 이름까지 전부 검사하도록 보강.
+  const nameParts = [mesh.name];
+  let p = mesh.parent;
+  while (p) { nameParts.push(p.name); p = p.parent; }
+  for (const mat of seakeepMaterialsOf(mesh)) nameParts.push(mat.name, mat.map && mat.map.name, mat.alphaMap && mat.alphaMap.name);
+  const label = nameParts.filter(Boolean).join(' ');
+  if (/(^|[_.\s-])(sea|sky|ocean|water)([_.\s-]|$)/i.test(label) || /sky\s*dome|skydome|sea\s*(plane|mesh|surface)|ocean\s*(plane|mesh|surface)/i.test(label)) return true;
+  // 보강: 이름이 안 걸려도 "아주 납작하고 넓은 평면"이면 하늘/바다 백드롭으로 간주(형태 기반 안전망).
+  const bb = new THREE.Box3().setFromObject(mesh);
+  const sz = new THREE.Vector3(); bb.getSize(sz);
+  const horiz = Math.max(sz.x, sz.z);
+  if (horiz > 0 && sz.y / horiz < 0.02 && horiz > 50) return true;
+  return false;
+}
+function seakeepTuneMaterial(m){
+  // ★섬(CPT_Island)과 같은 legacy FBX diffuse=black 증상 — seakeeptest.js와 동일한 보정(원본 색감 유지, 밝기만 정규화).
+  if (m.map) { m.map.colorSpace = THREE.SRGBColorSpace; if (m.color) m.color.setRGB(1.35, 1.35, 1.35); }
+  if (m.emissiveMap) m.emissiveMap.colorSpace = THREE.SRGBColorSpace;
+  if (m.emissive) m.emissive.set(0x000000);
+  if ('opacity' in m) m.opacity = 1;
+  if ('metalness' in m) m.metalness = 0;
+  if ('roughness' in m) m.roughness = Math.max(0.72, m.roughness || 0);
+  if ('shininess' in m) m.shininess = Math.min(18, m.shininess ?? 18);
+  m.side = THREE.DoubleSide;
+  if (m.alphaMap) { m.transparent = false; m.alphaTest = Math.max(m.alphaTest || 0, 0.35); }
+  else { m.transparent = false; m.alphaTest = 0; }
+  m.needsUpdate = true;
+}
+async function loadSeaKeepLandmark(){
+  const loader = new FBXLoader();
+  loader.setResourcePath(SEAKEEP + 'textures/');
+  const root = await new Promise((res, rej) => loader.load(SEAKEEP + 'source/Stronghold.fbx', res, undefined, rej));
+  root.name = 'SeaKeep_LonelyWatcher';
+  root.updateWorldMatrix(true, true); // Box3 안전망이 정확한 크기를 보게 traverse 전에 먼저 갱신
+
+  const removed = [];
+  root.traverse(o => {
+    if (!o.isMesh) return;
+    if (seakeepIsBackdrop(o)) { removed.push(o); return; }
+    seakeepMaterialsOf(o).forEach(seakeepTuneMaterial);
+    o.castShadow = true; o.receiveShadow = true;
+  });
+  removed.forEach(o => o.parent && o.parent.remove(o));
+
+  root.updateWorldMatrix(true, true);
+  let box = new THREE.Box3().setFromObject(root);
+  const raw = box.getSize(new THREE.Vector3());
+  const span = Math.max(raw.x, raw.z) || 1;
+  // ★진짜 진짜 근본 원인(2026-08-08, 여섯 번째): ATOLL_RADIUS*0.62(지름 105유닛)는 이 섬(군도형, 큰 섬 하나가
+  //   아니라 작은 바위섬들이 흩어진 형태)의 어떤 개별 섬보다도 컸다 — 중심을 아무리 잘 잡아도 절반(52유닛)이
+  //   반드시 물에 걸렸다. "키워달라"는 지시와 "물 밖으로 빼라"는 지시가 이 지형에서는 충돌해서, 실제로 안전하게
+  //   들어갈 수 있는 크기(ACTIVITY_RADIUS 활동권 안에서 검증된 크기)로 낮춘다.
+  const targetSpan = ACTIVITY_RADIUS * 1.0;
+  root.scale.setScalar(targetSpan / span);
+  root.updateWorldMatrix(true, true);
+  box = new THREE.Box3().setFromObject(root);
+  const center = box.getCenter(new THREE.Vector3());
+  // ★진짜 원인 발견(2026-08-08, 사령관이 세 번 지적한 뒤에야 찾음): (x,z)는 매번 제대로 육지를 찾고 있었는데
+  //   Y좌표를 실제 지형 높이가 아니라 "무조건 해수면(0)"으로 고정해놔서, 육지가 해수면보다 조금이라도 낮은
+  //   지형이면 모델 밑동이 물 속에 잠긴 것처럼 보였다(x,z만 확인하고 y는 안 본 게 근본 실수). ANCHOR 근처의
+  //   실제 지형 높이(groundAt)를 구해 거기에 맞춘다.
+  // 본섬(-100,0 근방)과 옆 산(100,0 근방) 사이 전체를 훑어 실제로 가장 높은 지점(=산 능선/봉우리)을 찾는다.
+  const keepSpot = findHighestPoint(0, 0, 140, 26);
+  const keepGroundY = keepSpot.y;
+  root.position.x += keepSpot.x - center.x;
+  root.position.z += keepSpot.z - center.z;
+  root.position.y += (keepGroundY != null ? keepGroundY : 0) - box.min.y; // 밑동을 실제 지형 표면에 맞춘다
+  scene.add(root);
+  console.log('[agentview] Sea Keep "Lonely Watcher" 랜드마크 배치 완료(실제 육지 위, 백드롭 제거 '+removed.length+'개)');
+}
+
+const STATE_COLOR = {
+  active: 0x3fae46, blocked: 0xd08a1e, failed: 0xb23f3f,
+  done: 0x3f7fc0, completed: 0x3f7fc0, queued: 0x888888, idle: 0x777777
+};
+
+// ── codex/tomob modules/player.js에서 발췌한 캐릭터+애니 로드 패턴 (KayKit, 전 캐릭터 공유 리그) ──
+const CHAR_FILES = ['Knight.glb','Rogue_Hooded.glb','Barbarian.glb','Mage.glb','Ranger.glb'];
+const ANIM_BASE = './assets/anims/';
+const ANIM_FILES = ['Rig_Medium_General.glb','Rig_Medium_MovementBasic.glb','Rig_Medium_Tools.glb'];
+const IDLE_CLIP = 'Idle_A';
+
+// 실제 도구 이름 → KayKit 애니메이션 클립 매핑 (player.js가 쓰는 Rig_Medium_Tools/General 클립명 그대로)
+// ★2026-08-10(24차): 매핑이 초기 8개 도구뿐이라, 요즘 실제로 대부분을 차지하는 MCP 도구·Skill·ToolSearch·
+//   TodoWrite 등이 전부 기본값(Work_A)으로 빠져 화면에서 다 똑같이 보였다. 실사용 도구 전체로 확장.
+const TOOL_ANIM = {
+  // 실행·명령 → 곡괭이질
+  Bash: 'Pickaxing', PowerShell: 'Pickaxing', BashOutput: 'Pickaxing', KillShell: 'Pickaxing',
+  // 읽기·탐색 → 땅 파서 찾기
+  Read: 'Digging', Grep: 'Digging', Glob: 'Digging', NotebookRead: 'Digging',
+  WebSearch: 'Digging', WebFetch: 'Digging', ToolSearch: 'Digging',
+  // 쓰기·수정 → 망치질/톱질
+  Edit: 'Hammering', MultiEdit: 'Hammering', Artifact: 'Hammering',
+  Write: 'Sawing', NotebookEdit: 'Sawing',
+  // 위임·보고·계획 → 상호작용/들어올리기
+  Agent: 'Interact', Task: 'Interact', Workflow: 'Interact', Skill: 'Interact',
+  AskUserQuestion: 'Interact', SendMessage: 'Interact',
+  TaskCreate: 'PickUp', TaskUpdate: 'PickUp', TodoWrite: 'PickUp', TaskList: 'PickUp',
+  EnterPlanMode: 'Holding_A', ExitPlanMode: 'Holding_A',
+};
+const DEFAULT_ANIM = 'Work_A';
+// MCP 도구는 이름이 `mcp__<서버>__<도구>`라 개별 등록이 불가능하다 — 서버 이름으로 성격을 가른다.
+const MCP_ANIM = [
+  [/^mcp__claude-in-chrome__/, 'Lockpicking'], // 브라우저 조작 — 뭔가를 계속 만지작거리는 동작
+  [/^mcp__.*(supabase|vercel|linear|figma)/, 'Working_C'],
+];
+// ★사령관 지적(2026-08-10) "돌 곡괭이로 안 캐는데? 나무도 그렇고" / "곡괭이 도끼 모션 다 있잖아":
+//   애니메이션을 **도구 이름** 기준으로 정한 게 설계 오류였다. 워커가 실제로 걸어가는 곳은 카테고리(광물/나무/
+//   제작대/본부)인데, 예컨대 Read는 나무로 보내면서 동작은 Digging(삽질)이라 **나무 앞에서 땅을 파고 있었다**.
+//   목적지에 도착해서 하는 동작은 도구 이름이 아니라 **그 자리에 무엇이 있는지**로 정해야 한다.
+//   (실제 게임 player.js LOADOUT도 곡괭이=Pickaxing, 도끼=Chopping으로 도구와 모션을 짝지어 둔다)
+const CATEGORY_ANIM = { ore: 'Pickaxing', forage: 'Chopping', build: 'Hammering', base: 'Interact',
+  smith: 'Hammering', saw: 'Sawing', trade: 'Interact' };
+// 손에 드는 도구 — player.js LOADOUT의 실제 모델·스케일·회전값 그대로.
+const TOOL_BASE = REAL + 'tools/';
+const CATEGORY_TOOL = {
+  ore:    { file:'tool-pickaxe.glb',          kenney:true,  scale:5, rot:[0, Math.PI, 0] },
+  forage: { file:'axe_1handed.gltf',          kenney:false, scale:1, rot:[0, Math.PI, 0] },
+  build:  { file:'tool-hammer-upgraded.glb',  kenney:true,  scale:5, rot:[0, Math.PI, 0] },
+  smith:  { file:'tool-hammer-upgraded.glb',  kenney:true,  scale:5, rot:[0, Math.PI, 0] }, // 모루 앞 망치질
+  saw:    { file:'axe_1handed.gltf',          kenney:false, scale:1, rot:[0, Math.PI, 0] }, // 전용 톱 에셋이 없어 도끼 + Sawing 클립
+};
+function animForCategory(category, tool){
+  // 운반 중 납품 동작만 도구와 무관하게 고정(내려놓기)
+  if (CATEGORY_ANIM[category]) return CATEGORY_ANIM[category];
+  if (TOOL_ANIM[tool]) return TOOL_ANIM[tool];
+  for (const [re, clip] of MCP_ANIM) if (re.test(tool)) return clip;
+  return DEFAULT_ANIM;
+}
+
+const loader = new GLTFLoader();
+const load = (u) => new Promise((res, rej) => loader.load(u, res, undefined, rej));
+
+const sharedClips = new Map();
+const clipsReady = (async () => {
+  for (const f of ANIM_FILES) {
+    try {
+      const g = await load(ANIM_BASE + f);
+      for (const c of g.animations) if (!sharedClips.has(c.name)) sharedClips.set(c.name, c);
+    } catch (e) { console.warn('[agentview] anim load fail', f, e); }
+  }
+  console.log('[agentview] loaded clips:', [...sharedClips.keys()].join(', '));
+})();
+
+// 중앙 건설 현장의 발치 클리어런스(나무/광물 스폰 금지 반경과 동일값) — 워커도 이 안쪽엔 안 선다.
+const BUILD_CLEAR_R = 14;
+function hashPos(id){
+  let h = 0;
+  for (let i=0;i<id.length;i++) h = (h*31 + id.charCodeAt(i)) >>> 0;
+  const a = (h % 1000)/1000 * Math.PI*2;
+  // ★22차: 고정 상수(ACTIVITY_RADIUS=42)로 흩뿌리던 걸 카메라가 실제로 담는 반경(FRAME_R) 기준으로 교체 —
+  //   이전엔 최대 37.8까지 나가서 워커가 전원 프레임 밖에 서 있었다. 배치 후 투영으로 직접 확인하고,
+  //   그래도 밖이면 반경을 줄여가며 재시도한다(육지 판정 findLandNear가 좌표를 밀어낼 수 있어서 안전망 필요).
+  const rMax = FRAME_R;
+  const rMin = Math.min(rMax * 0.55, BUILD_CLEAR_R);
+  const r = rMin + (h % 5000)/5000 * Math.max(0, rMax - rMin);
+  // ANCHOR(카메라 클로즈업 기준점) 주변에서만 스폰 — 환초 전체가 아니라 실제 화면에 보이는 범위에 모이게.
+  // 원이 아니라 화면 모양에 맞춘 타원: 화면 좌우(CAM_RIGHT)는 r, 깊이(CAM_FWD)는 r*DEPTH_GAIN.
+  const p = frameEllipse(a, r);
+  const land = landInFrame(p.x, p.z);
+  return { x: land.x, z: land.z, h };
+}
+// ANCHOR 기준, 화면 좌우/깊이 축으로 늘린 타원 위의 한 점(월드 XZ).
+function frameEllipse(angle, r){
+  const cx = Math.cos(angle) * r, cz = Math.sin(angle) * r * DEPTH_GAIN;
+  return {
+    x: ANCHOR.x + CAM_RIGHT.x * cx + CAM_FWD.x * cz,
+    z: ANCHOR.z + CAM_RIGHT.z * cx + CAM_FWD.z * cz
+  };
+}
+// 육지 위이면서 화면 안인 좌표로 보정 — 밖이면 ANCHOR 쪽으로 당겨가며 재시도(findLandNear가 좌표를 밖으로
+// 밀어낼 수 있어서 육지 판정만으로는 프레임 안을 보장 못 한다).
+function landInFrame(x, z){
+  let p = findLandNear(x, z);
+  for (let k=0; k<6 && !inFrame(p.x, p.z); k++){
+    x = ANCHOR.x + (x - ANCHOR.x) * 0.78;
+    z = ANCHOR.z + (z - ANCHOR.z) * 0.78;
+    p = findLandNear(x, z);
+  }
+  return p;
+}
+
+// ── 도구 → 작업 목적지 카테고리 (worker가 실제로 걸어가는 지점) ──
+const TOOL_TARGET = {
+  Bash: 'ore', PowerShell: 'ore', BashOutput: 'ore', KillShell: 'ore',
+  Read: 'forage', Grep: 'forage', Glob: 'forage', NotebookRead: 'forage',
+  WebSearch: 'forage', WebFetch: 'forage', ToolSearch: 'forage',
+  Edit: 'smith', MultiEdit: 'smith', Artifact: 'smith',            // 고쳐 벼리는 일 → 대장간
+  Write: 'saw', NotebookEdit: 'saw',                                // 새로 켜내는 일 → 제재소
+  Agent: 'base', Task: 'base', Workflow: 'base', Skill: 'base', AskUserQuestion: 'base',
+  SendMessage: 'base', TaskCreate: 'base', TaskUpdate: 'base', TaskList: 'base', TodoWrite: 'base',
+  EnterPlanMode: 'base', ExitPlanMode: 'base',
+};
+// ★사령관 지적(2026-08-10) "벌목은 왜 안 함?" — 노드도 도구도 멀쩡했는데, 실제로 벌목을 유발하는 도구
+//   (Read/Grep/Glob)가 요즘 세션에서 거의 안 쓰였다. 도구 사용 분포가 Edit(제작)·Bash(광물)·MCP에 쏠려
+//   있어 forage로 갈 일이 없었던 것. MCP 브라우저 조작은 "화면을 뒤져 정보를 얻는" 일이라 성격상 채집에
+//   가까우므로 forage로 돌린다(나머지 MCP는 외부 시스템과 주고받는 일이라 base 유지).
+function targetForTool(tool){
+  if (TOOL_TARGET[tool]) return TOOL_TARGET[tool];
+  if (/^mcp__claude-in-chrome__/.test(tool)) return 'forage';
+  return 'base';
+}
+// ★사령관 지적(2026-08-11) "벌목만 하고 있음, 광산은 안 캐고" — 29차의 "벌목을 안 한다"와 **같은 뿌리이고
+//   방향만 뒤집힌** 문제다. 도구→카테고리가 1:1 고정이라 그 세션의 도구 편중이 화면 편중으로 그대로 나온다.
+//   실측: 최근 이벤트 8건이 Read×4 + 브라우저 MCP×4 = 8/8 전부 forage, Bash(광물) 0건.
+//   매핑 숫자를 또 옮기면 다음 세션에 또 뒤집히므로, **워커에게 직업을 고정**한다 —
+//   광부/나무꾼/목수를 돌아가며 배정하고, 도구 이벤트는 "그 워커가 일을 시작한다"는 신호로만 쓴다.
+//   그래야 어떤 도구가 몰려 들어와도 광산·숲·건설이 항상 동시에 돌아간다.
+//   단, 위임·보고·계획(Agent/Task/AskUserQuestion 등)은 성격이 뚜렷하고 드물어서 그대로 본부로 보낸다.
+// 일감이 없을 때의 대기 자세 — 왜 안 움직이는지가 몸으로 읽히게 한다.
+//   blocked(사령관 입력 대기) = 두리번거리는 Idle_B · failed = 주저앉듯 Idle_B · done = 차분한 Idle_A
+const IDLE_BY_JOB = { active:'Idle_A', blocked:'Idle_B', idle:'Idle_B', done:'Idle_A', completed:'Idle_A', failed:'Idle_B' };
+// ★사령관 지시(2026-08-11) "대장간 건물 앞에서 모루에서 작업하는 애도 있어야" — 작업장을 6종으로 늘린다.
+//   광산·숲은 자원 노드가 있는 구역, 대장간·제재소·시장은 건물 앞 작업 지점, 건설현장은 납품처.
+const ROLE_CYCLE = ['ore', 'forage', 'smith', 'saw', 'trade', 'build'];
+const ROLE_NAME = { ore: '광부', forage: '나무꾼', smith: '대장장이', saw: '제재공', trade: '상인', build: '목수' };
+let roleSeq = 0, charSeq = 0;
+function categoryFor(w, tool){
+  const explicit = targetForTool(tool);
+  if (explicit === 'base') return 'base';  // 보고하러 가는 건 직업과 무관
+  return w.role || explicit;
+}
+// 실측 섬 반경(ISLAND_RADIUS)의 비율로 좌표를 잡는다 — 실물 FBX 크기를 로드 전엔 몰라서 절대좌표 대신 비율 사용.
+let NODES = null;
+function computeNodes(){
+  // ★사령관 지시(2026-08-08 "만들어질 집이 가운데 구도로 와야하고 다른 에이전트들이 조금더 멀리서보여야지"):
+  //   건설 현장은 카메라가 실제로 바라보는 지점(ANCHOR, fitCameraToAnchor의 controls.target)에 정확히
+  //   고정 — 화면 중앙에 오도록. base/ore/forage는 반대로 더 바깥쪽으로 밀어내 "중앙의 건물 + 그 뒤로
+  //   멀찍이 흩어져 일하는 워커들"처럼 읽히게 한다.
+  // ★22차: base 노드도 ACTIVITY_RADIUS*0.95(=40, 프레임 밖)에서 FRAME_R 기준으로 교체 —
+  //   "조금 더 멀리서 보이게"라는 의도는 유지하되 화면 안에서 가장 먼 쪽에 둔다.
+  const A = ANCHOR;
+  const raw = {
+    // ★24차: base가 한 점뿐이라 보고하러 가는 워커들이 같은 자리에 겹쳤다(활성 세션까지 워커로 잡으면서
+    //   워커 수가 3→6으로 늘어난 뒤 두드러졌다). 화면 위쪽에 세 자리로 벌린다.
+    base:  [frameEllipse(Math.PI*0.5, FRAME_R*0.9), frameEllipse(Math.PI*0.72, FRAME_R*0.8), frameEllipse(Math.PI*0.28, FRAME_R*0.8)],
+    build: [{x:A.x, z:A.z}, {x:A.x, z:A.z}],
+  };
+  NODES = { ore: [], forage: [] };
+  for (const key in raw) NODES[key] = raw[key].map(p => { const l = landInFrame(p.x, p.z); return { x:l.x, z:l.z }; });
+}
+// 중앙(건설 현장) 근처의 실제 배치 나무/광물은 제외하고, 그보다 바깥쪽 것들 중 가장 가까운 것을 워커 목적지로
+// 삼는다 — 그래야 채집/벌목 워커가 화면 중앙(건물)을 침범하지 않고 그 뒤쪽에서 일하는 것처럼 보인다.
+// (22차부터 그 반경은 buildRealEnvironment 안에서 FRAME_R·BUILD_CLEAR_R 기준으로 계산한다)
+// 건설 현장(NODES.build) 발치에 나무/광물이 겹쳐서 자라는 것 방지(사령관 "건물 바로 앞에 석탄같은게있어" — 건물
+// 실측 대각선 반경보다 넉넉한 클리어런스, 건물을 키운 뒤(buildSiteHeight 6→11) 14m로 같이 확대).
+// computeNodes()가 먼저 실행돼 NODES.build가 이미 채워진 뒤에 호출됨.
+function tooCloseToBuildSite(x, z, r){
+  if (!NODES || !NODES.build) return false;
+  return NODES.build.some(p => { const dx=x-p.x, dz=z-p.z; return dx*dx+dz*dz < r*r; });
+}
+// ★사령관 지적(2026-08-08 "화면이 답답해보임/구도가 이상함"): 시드 고정 PRNG라 매번 똑같은 나무가 카메라
+//   기본 시점의 시선(camera→anchor 직선) 위에 정확히 겹쳐서(실측 5.3°off, 47유닛 거리 — 캔버스 절반을 가리는 크기)
+//   재현성 있게 화면을 막고 있었다. loadHomeIsland()의 fitCameraToAnchor()가 이미 실행돼 camera.position/
+//   controls.target이 확정된 뒤에 나무/광물 배치가 돌아가므로, 그 시선 회랑만 살짝 비워서 해결한다(회랑 밖은
+//   그대로 원본 알고리즘 결과 유지 — 섬 전체를 성기게 만드는 게 아니라 카메라 정면만 청소).
+function tooCloseToSightline(x, z, r){
+  const ax = camera.position.x, az = camera.position.z, bx = controls.target.x, bz = controls.target.z;
+  const dx = bx-ax, dz = bz-az, len2 = dx*dx+dz*dz || 1;
+  let t = ((x-ax)*dx + (z-az)*dz) / len2; t = Math.max(0, Math.min(1, t));
+  const px = ax+t*dx, pz = az+t*dz, ddx = x-px, ddz = z-pz;
+  return (ddx*ddx+ddz*ddz) < r*r;
+}
+
+// ══ 실제 게임 modules/environment.js 이식 — 나무(KayKit 20종, 아틀라스 초록 판정)·잔디(같은 셰이더)·광물(mine.js 9종 실물) ══
+// ★사령관 지시(2026-08-08 "제대로 안 가져온거 같은데?"): 3~5차의 임의 스캐터/장식 배치를 버리고, environment.js의
+//   실제 알고리즘(티어 프로필·아틀라스 색 샘플·산 링 배치·희귀도 가중치)을 그대로 이식한다.
+// 티어 판정: 세션 이름 "시작의섬 카브"는 /소형|중형|대형|얼음/ 어디에도 안 걸려 environment.js 기준 기본값 'mid'.
+//   CFG.mid = trees:75, oreRing:18, oreExtra:24, grass:true, rock:0(배경돌 없음 — 채광 '돌'과 헷갈려서 사령관이 이미 뺀 값).
+const ENV_CFG = { trees: 75, oreRing: 18, oreExtra: 24 };
+const TREE_TYPES_ALL = ['Tree_1_A','Tree_1_B','Tree_1_C','Tree_2_A','Tree_2_B','Tree_2_C','Tree_2_D','Tree_2_E',
+  'Tree_3_A','Tree_3_B','Tree_3_C','Tree_4_A','Tree_4_B','Tree_4_C',
+  'Tree_Bare_1_A','Tree_Bare_1_B','Tree_Bare_1_C','Tree_Bare_2_A','Tree_Bare_2_B','Tree_Bare_2_C'];
+
+async function loadTreeProtos(){
+  const gl = new GLTFLoader();
+  const protos = [];
+  await Promise.all(TREE_TYPES_ALL.map(name => gl.loadAsync(REAL + 'trees/' + name + '_Color1.gltf').then(g => {
+    let src = null; g.scene.updateMatrixWorld(true); g.scene.traverse(o => { if (o.isMesh && !src) src = o; });
+    if (!src) return;
+    let geo = src.geometry.index ? src.geometry.toNonIndexed() : src.geometry.clone();
+    src.updateMatrixWorld(true); geo.applyMatrix4(src.matrixWorld);
+    geo.computeBoundingBox(); let bb = geo.boundingBox; const s = 1/((bb.max.y-bb.min.y)||1);
+    geo.scale(s, s, s); geo.computeBoundingBox(); bb = geo.boundingBox; geo.translate(0, -bb.min.y, 0);
+    const mat = Array.isArray(src.material) ? src.material[0] : src.material;
+    mat.side = THREE.DoubleSide; if (mat.map) mat.map.colorSpace = THREE.SRGBColorSpace; mat.needsUpdate = true;
+    protos.push({ name, geo, mat });
+  }).catch(e => console.warn('[agentview] tree proto fail', name, e))));
+  return protos;
+}
+
+// environment.js placeTrees()와 동일 알고리즘: 산 회피 + 수면 위 + 완만한 경사(face normal) + 아틀라스 초록 판정.
+function placeTreesReal(protos, target, centerX, centerZ, radius){
+  let seed = 20260629 >>> 0;
+  const rnd = () => { seed = (seed*1664525+1013904223)>>>0; return seed/4294967296; };
+  const placedList = [];
+  let tries = 0, placed = 0;
+  while (placed < target && tries < target*12) {
+    tries++;
+    const a = rnd()*6.283, rr = Math.sqrt(rnd())*radius;
+    const x = centerX + Math.cos(a)*rr, z = centerZ + Math.sin(a)*rr;
+    if (MOUNTAINS.some(m => { const dx=x-m.x, dz=z-m.z; return dx*dx+dz*dz < (m.r*0.95)*(m.r*0.95); })) continue;
+    // ★22차: 나무 높이가 15~30이라 활동권 안에 서면 워커를 통째로 가린다(실측 스샷에서 워커 하나가 나무에
+    //   완전히 덮였다). 활동권(카메라가 담는 반경) 안쪽은 잔디만 남기고 나무는 그 바깥에만 심는다 —
+    //   화면 가장자리로는 여전히 숲이 보여서 허전해지지 않는다.
+    //   비우는 폭은 방향에 따라 다르다 — 카메라와 워커 사이(화면 아래쪽)에 선 나무만 시야를 막고,
+    //   카메라에서 먼 쪽(화면 위쪽)의 나무는 오히려 배경을 채워주고 채집 목적지로도 쓰인다.
+    {
+      const rx = x-ANCHOR.x, rz = z-ANCHOR.z;
+      const fwd = rx*CAM_FWD.x + rz*CAM_FWD.z; // +면 카메라에서 먼 쪽, -면 카메라 쪽
+      const clear = Math.max(BUILD_CLEAR_R, FRAME_R * (fwd < 0 ? 1.6 : 0.8));
+      if (rx*rx + rz*rz < clear*clear) continue;
+    }
+    if (tooCloseToBuildSite(x, z, 14) || tooCloseToSightline(x, z, 13)) continue;
+    const h = groundHit(x, z); if (!h) continue;
+    if (h.point.y < WATER_LEVEL+0.5) continue;
+    if (h.face) { const nr = h.face.normal.clone().transformDirection(h.object.matrixWorld); if (nr.y < 0.85) continue; }
+    if (!isGreenAt(h)) continue;
+    const dx = x-centerX, dz = z-centerZ; if (dx*dx+dz*dz < 64) continue;
+    const proto = protos[(rnd()*protos.length)|0]; if (!proto) continue;
+    const H = 15 + Math.pow(rnd(),1.1)*15; // environment.js와 동일 수식(실제 게임 나무 높이)
+    // ★22차: 거리 기준 클리어런스만으로는 근경 나무를 다 못 거른다 — 같은 거리라도 카메라를 눕힌 뒤로는
+    //   화면에서 훨씬 크게 잡힌다. 실제로 "화면 높이의 몇 %를 먹는지"로 직접 판정해서, 시야를 덮는
+    //   근경 나무만 스킵한다(프레임 밖 나무는 아무리 커도 무관하므로 건드리지 않는다).
+    if (inFrame(x, z, 1.0)) {
+      const camD = Math.max(1, camera.position.distanceTo(new THREE.Vector3(x, h.point.y, z)));
+      const screenSpanY = 2 * camD * Math.tan(THREE.MathUtils.degToRad(camera.fov)/2);
+      if (H / screenSpanY > 0.30) continue; // 화면 높이의 30% 넘게 먹는 나무는 배치하지 않음
+    }
+    const mesh = new THREE.Mesh(proto.geo, proto.mat);
+    mesh.scale.setScalar(H); mesh.position.set(x, h.point.y, z); mesh.rotation.y = rnd()*6.283;
+    mesh.castShadow = true; scene.add(mesh);
+    // 나무도 마찬가지 — 밑동 반경만큼 앞에 서야 도끼질이 나무를 향한다(사령관 "벌목도 마찬가지").
+    //   캐노피(잎)까지 재면 반경이 과하게 커지므로 줄기 굵기 기준으로 잡는다(높이 H에 비례).
+    placedList.push({ x, z, y: h.point.y, r: Math.max(0.8, H * 0.055), mesh });
+    placed++;
+  }
+  return placedList;
+}
+
+// ── 광물 9종: environment.js GEO_SRC/ORES/RARITY 그대로(같은 소스 메시를 색만 바꿔 여러 광종에 재사용) ──
+const ORE_GEO_SRC = {
+  ruda:    { type:'objmtl', dir: REAL+'ore/ruda/', obj:'Ruda_final.obj', mtl:'Ruda_final.mtl' },
+  crystal: { type:'obj', dir: REAL+'ore/', obj:'ChristalUV.obj' },
+  desert:  { type:'obj', dir: REAL+'ore/', obj:'Rocky_The_LowPoly_Rock.obj' },
+  orerock: { type:'fbx', url: REAL+'ore/PT_Ore_Rock_01.fbx' },
+};
+const ORES = [
+  {name:'돌',    src:'desert',  lp:{color:0x9a9286, metalness:0,    roughness:0.95}},
+  {name:'석탄',  src:'orerock', lp:{color:0x202227, metalness:0.05, roughness:0.7}},
+  {name:'철광석',src:'ruda',    lp:{color:0x6b7686, shiny:true, metalness:0.72, roughness:0.42, clearcoat:0.4, emissive:0x202a36, emissiveIntensity:0.08}},
+  {name:'구리',  src:'ruda',    lp:{color:0xc16a38, shiny:true, metalness:0.85, roughness:0.34, clearcoat:0.5, emissive:0x3a1c0c, emissiveIntensity:0.08}},
+  // ★limonite 원본(19MB obj)은 environment.js도 HEAVY(5000삼각형↑)면 무조건 orerock으로 자동 치환 — 로드만 하고 버려질 걸 알아서 처음부터 안 받고 바로 orerock 사용(결과 동일).
+  {name:'주석',  src:'orerock', lp:{color:0x9ba2aa, metalness:0.55, roughness:0.5}},
+  {name:'은',    src:'ruda',    lp:{color:0xd6dade, shiny:true, metalness:0.95, roughness:0.2, clearcoat:0.6}},
+  {name:'코발트',src:'crystal', lp:{color:0x2f55d4, shiny:true, metalness:0.6,  roughness:0.28, clearcoat:0.9, emissive:0x162f8c, emissiveIntensity:0.18}},
+  {name:'금',    src:'ruda',    lp:{color:0xe6b73a, shiny:true, metalness:0.95, roughness:0.22, clearcoat:0.6, emissive:0x4a3408, emissiveIntensity:0.12}},
+  {name:'보석',  src:'crystal', lp:{color:0xd83a5e, shiny:true, metalness:0.15, roughness:0.1, clearcoat:1, emissive:0x7a1830, emissiveIntensity:0.2}},
+];
+const ORE_RARITY_NORMAL = { 돌:24, 석탄:8, 철광석:7, 구리:5, 주석:4, 은:2.5, 코발트:1.5, 금:1, 보석:0.6 }; // CFG.mid.oreW='normal'
+
+function matFromLp(lp){
+  const col = new THREE.Color(lp.color ?? 0x8a8378); let mat;
+  if (lp.shiny) mat = new THREE.MeshPhysicalMaterial({ color:col, flatShading:true, metalness:lp.metalness??0.8, roughness:lp.roughness??0.22, clearcoat:lp.clearcoat??1, clearcoatRoughness:0.15 });
+  else mat = new THREE.MeshStandardMaterial({ color:col, flatShading:true, roughness:lp.roughness??0.9, metalness:lp.metalness??0.05 });
+  if (lp.emissive != null) { mat.emissive = new THREE.Color(lp.emissive); mat.emissiveIntensity = lp.emissiveIntensity ?? 0.1; }
+  mat.side = THREE.DoubleSide;
+  return mat;
+}
+function ensureAttrs(g){
+  if (g.index) g = g.toNonIndexed();
+  for (const k of Object.keys(g.attributes)) { if (k !== 'position' && k !== 'normal') g.deleteAttribute(k); }
+  if (!g.getAttribute('normal')) g.computeVertexNormals();
+  return g;
+}
+function toSingleGeo(root, target){
+  root.updateWorldMatrix(true, true);
+  const gs = [];
+  root.traverse(m => { if (m.isMesh) { let g = m.geometry.clone(); g.applyMatrix4(m.matrixWorld); gs.push(ensureAttrs(g)); } });
+  let geo = gs.length > 1 ? mergeGeometries(gs, false) : gs[0];
+  geo.computeBoundingBox();
+  const sz = geo.boundingBox.getSize(new THREE.Vector3()), c = geo.boundingBox.getCenter(new THREE.Vector3());
+  const s = target / (Math.max(sz.x, sz.y, sz.z) || 1);
+  geo.translate(-c.x, -c.y, -c.z); geo.scale(s, s, s);
+  geo.computeVertexNormals(); geo.computeBoundingBox(); geo.translate(0, -geo.boundingBox.min.y, 0);
+  return geo;
+}
+async function loadOreRaw(it){
+  if (it.type === 'objmtl') {
+    const mtl = await new MTLLoader().setPath(it.dir).loadAsync(it.mtl); mtl.preload();
+    return await new OBJLoader().setMaterials(mtl).setPath(it.dir).loadAsync(it.obj);
+  }
+  if (it.type === 'obj') return await new OBJLoader().setPath(it.dir).loadAsync(it.obj);
+  return await new FBXLoader().loadAsync(it.url);
+}
+async function loadOreGeoCache(){
+  const cache = {};
+  for (const k in ORE_GEO_SRC) { try { cache[k] = toSingleGeo(await loadOreRaw(ORE_GEO_SRC[k]), 3.0); } catch (e) { console.warn('[agentview] ore geo fail', k, e); } }
+  for (const ore of ORES) { ore.geo = cache[ore.src] || null; ore.mat = matFromLp(ore.lp); }
+}
+function pickOre(rnd){
+  const weights = ORES.map(o => ORE_RARITY_NORMAL[o.name] || 0);
+  const sum = weights.reduce((s,w)=>s+w, 0);
+  let t = rnd()*sum;
+  for (let i=0;i<ORES.length;i++) { if ((t -= weights[i]) <= 0) return ORES[i]; }
+  return ORES[0];
+}
+// environment.js buildOres()와 동일: 산 링(oreRing) + 섬 전역 산개(oreExtra), 희귀도 가중치로 광종 추첨.
+function placeOresReal(centerX, centerZ, radius){
+  let seed = 20260629 >>> 0;
+  const rnd = () => { seed = (seed*1664525+1013904223)>>>0; return seed/4294967296; };
+  const list = [];
+  function placeOre(x, z){
+    if (tooCloseToBuildSite(x, z, 14) || tooCloseToSightline(x, z, 6)) return null;
+    const h = groundHit(x, z); if (!h || h.point.y < WATER_LEVEL+0.3) return null;
+    const ore = pickOre(rnd); if (!ore.geo) return null;
+    const s = 0.7 + rnd()*0.7;
+    const mesh = new THREE.Mesh(ore.geo, ore.mat.clone());
+    mesh.scale.setScalar(s); mesh.position.set(x, h.point.y - 0.1, z); mesh.rotation.y = rnd()*6.283;
+    mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh);
+    mesh.userData.ore = ore.name;
+    // ★사령관 지적(2026-08-10) "곡괭이질을 하는 게 아니라 돌 속으로 들어감": 워커가 노드 **중심 좌표**로
+    //   걸어가서 광물 메시 안에 파묻혔다. 실제 메시 반경을 재서 그만큼 앞에 서게 한다.
+    const ob = new THREE.Box3().setFromObject(mesh);
+    const osz = new THREE.Vector3(); ob.getSize(osz);
+    const entry = { x, z, y: h.point.y, name: ore.name, r: Math.max(osz.x, osz.z) * 0.5, mesh };
+    list.push(entry);
+    return entry;
+  }
+  for (const m of MOUNTAINS) {
+    for (let i=0;i<ENV_CFG.oreRing;i++){
+      const a = (i/ENV_CFG.oreRing)*6.283 + rnd()*0.35, rr = m.r*(0.85+rnd()*0.55);
+      placeOre(m.x+Math.cos(a)*rr, m.z+Math.sin(a)*rr);
+    }
+  }
+  for (let i=0, tries=0; i<ENV_CFG.oreExtra && tries<ENV_CFG.oreExtra*18; tries++){
+    const a = rnd()*6.283, rr = Math.sqrt(rnd())*radius*0.85;
+    if (placeOre(centerX+Math.cos(a)*rr, centerZ+Math.sin(a)*rr)) i++;
+  }
+  return list;
+}
+
+// ── 잔디: environment.js buildGrass()와 동일 셰이더/인스턴싱, 범위만 본섬(ATOLL_ROOT) bbox 그대로 ──
+let grassMat = null; const grassChunks = [];
+// ★2.4배는 확대해서 보면 진하고 좋았지만 사령관이 줌아웃한 전체 섬 뷰에서 "징그럽다"(반점처럼 보임)고
+//   지적 — 이제 바닥 자체가 초록으로 칠해지므로(위 loadHomeIsland 아틀라스 보정) 블레이드는 디테일만
+//   더하면 되니 과한 확대는 줄인다.
+const GRASS_SCALE_BOOST = 1.5;
+function buildGrassReal(){
+  const bb = new THREE.Box3().setFromObject(ATOLL_ROOT);
+  const minX=bb.min.x, maxX=bb.max.x, minZ=bb.min.z, maxZ=bb.max.z;
+  const GW = 120, cx=(maxX-minX)/GW, cz=(maxZ-minZ)/GW;
+  const gyA = new Float32Array(GW*GW), gok = new Uint8Array(GW*GW);
+  for (let i=0;i<GW;i++) for (let j=0;j<GW;j++){
+    const x = minX+(i+0.5)*cx, z = minZ+(j+0.5)*cz;
+    const h = groundHit(x, z); let ok=0, y=0;
+    if (h && h.point.y > WATER_LEVEL+0.5 && isGreenAt(h)) {
+      y = h.point.y;
+      const nr = h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld) : null;
+      ok = (!nr || nr.y > 0.78) ? 1 : 0;
+    }
+    gyA[i*GW+j]=y; gok[i*GW+j]=ok;
+  }
+  const BL=40, RAD=1.7, segs=3; const pos=[],aH=[],idx=[]; let vb=0; let r=98765; const rr=()=>{ r=(r*9301+49297)%233280; return r/233280; };
+  for (let b=0;b<BL;b++){
+    const a=rr()*6.283, rad=Math.sqrt(rr())*RAD, bx=Math.cos(a)*rad, bz=Math.sin(a)*rad;
+    const H=0.21+rr()*0.18, w=0.05*(1+rr()*0.5), az=rr()*6.283, ca=Math.cos(az), sa=Math.sin(az), lean=0.05+rr()*0.16;
+    for (let i=0;i<=segs;i++){ const t=i/segs, y=t*H, ww=w*(1-t*0.85), bzz=t*t*lean;
+      for (const s of [-1,1]){ const lx=s*ww; pos.push(bx+lx*ca-bzz*sa, y, bz+lx*sa+bzz*ca); aH.push(t); } }
+    for (let i=0;i<segs;i++){ const k=vb+i*2; idx.push(k,k+1,k+2, k+1,k+3,k+2); } vb+=(segs+1)*2;
+  }
+  const posAttr=new THREE.Float32BufferAttribute(pos,3), aHAttr=new THREE.Float32BufferAttribute(aH,1), idxAttr=new THREE.Uint16BufferAttribute(idx,1);
+  grassMat = new THREE.ShaderMaterial({ side:THREE.DoubleSide, uniforms:{ uTime:{value:0}, uCamPos:{value:new THREE.Vector3()}, uLight:{value:1} },
+    vertexShader:`uniform float uTime; uniform vec3 uCamPos; attribute vec3 iOffset; attribute float iAngle; attribute float iScale; attribute float iTint; attribute float aH; varying float vH; varying float vT;
+      void main(){ vH=aH; vT=iTint; float s=sin(iAngle),c=cos(iAngle); vec3 q=position*iScale; q=vec3(q.x*c-q.z*s,q.y,q.x*s+q.z*c);
+        vec4 wb=modelMatrix*vec4(iOffset,1.0); float camd=distance(uCamPos.xz, wb.xz);
+        float hs=mix(0.4,1.0,smoothstep(2.0,8.0,camd));
+        q.y*=hs;
+        float w=sin(uTime*1.3+iOffset.x*0.4+iOffset.z*0.5)+0.4*sin(uTime*2.3+iOffset.x*0.8); float bend=w*0.12*aH*aH*hs; q.x+=bend*c; q.z+=bend*s+bend*0.3;
+        gl_Position=projectionMatrix*modelViewMatrix*vec4(q+iOffset,1.0); }`,
+    fragmentShader:`varying float vH; varying float vT; uniform float uLight;
+      void main(){ vec3 base=vec3(0.25,0.33,0.14), tip=vec3(0.42,0.50,0.20); vec3 col=mix(base,tip,vH); col*=0.95+vT*0.1; col*=0.82+0.18*vH;
+        col*=uLight;
+        gl_FragColor=vec4(col,1.0); }` });
+  const STEP=2.7, CHUNK=30, buckets=new Map();
+  for (let x=minX;x<maxX;x+=STEP) for (let z=minZ;z<maxZ;z+=STEP){
+    const jx=x+(Math.random()-0.5)*STEP, jz=z+(Math.random()-0.5)*STEP;
+    const i=Math.min(GW-1,Math.max(0,(jx-minX)/cx|0)), j=Math.min(GW-1,Math.max(0,(jz-minZ)/cz|0));
+    if (!gok[i*GW+j]) continue;
+    const ng=Math.sin(jx*0.055)*Math.sin(jz*0.05)+Math.sin(jx*0.12+jz*0.08)*0.6;
+    if (ng < -0.78) continue;
+    const ck=Math.floor(jx/CHUNK), cl=Math.floor(jz/CHUNK), key=ck+','+cl;
+    let bk=buckets.get(key); if (!bk){ bk={ ccx:(ck+0.5)*CHUNK, ccz:(cl+0.5)*CHUNK, off:[],ang:[],scl:[],tnt:[] }; buckets.set(key,bk); }
+    // ★사령관 "게임 본편 섬 다시 가서 확인해봐"(2026-08-08) — 직접 codex/tomob을 켜서 실측: 실제 게임은
+    //   1인칭/3인칭 근접 시점이라 잔디 블레이드(H 0.21~0.39, w 0.05~0.075) 하나하나가 화면을 채워 초록이
+    //   빽빽해 보이지만, 이 대시보드는 훨씬 먼 쿼터뷰 카메라(ACTIVITY_RADIUS*1.65≈69유닛)라 같은 블레이드가
+    //   화면상 실폭 1~2px로 쪼그라들어 초록이 거의 안 보이고 밑에 깔린 회색/황토 아틀라스만 두드러졌다.
+    //   텍스처·조명·배치 알고리즘은 이미 원본과 일치 확인함 — 남은 차이는 순수 "관측 거리" 문제이므로
+    //   블레이드 자체 스케일을 이 카메라 거리에 맞게 키운다(배치 위치/개수/색은 원본 그대로, 크기만 보정).
+    bk.off.push(jx-bk.ccx, gyA[i*GW+j], jz-bk.ccz); bk.ang.push(rr()*6.283); bk.scl.push((0.85+rr()*0.5) * GRASS_SCALE_BOOST); bk.tnt.push(rr());
+  }
+  for (const bk of buckets.values()){
+    const n=bk.ang.length; if (!n) continue;
+    const g=new THREE.InstancedBufferGeometry(); g.setAttribute('position',posAttr); g.setAttribute('aH',aHAttr); g.setIndex(idxAttr);
+    g.setAttribute('iOffset', new THREE.InstancedBufferAttribute(new Float32Array(bk.off),3));
+    g.setAttribute('iAngle', new THREE.InstancedBufferAttribute(new Float32Array(bk.ang),1));
+    g.setAttribute('iScale', new THREE.InstancedBufferAttribute(new Float32Array(bk.scl),1));
+    g.setAttribute('iTint', new THREE.InstancedBufferAttribute(new Float32Array(bk.tnt),1));
+    g.instanceCount=n; g.boundingSphere=new THREE.Sphere(new THREE.Vector3(0,0.4,0), CHUNK*0.75+RAD+0.8);
+    const mesh=new THREE.Mesh(g,grassMat); mesh.position.set(bk.ccx,0,bk.ccz); mesh.frustumCulled=true; scene.add(mesh); grassChunks.push(mesh);
+  }
+  console.log('[agentview] 잔디 패치', grassChunks.length, '청크');
+}
+
+async function buildRealEnvironment(){
+  const [treeProtos] = await Promise.all([ loadTreeProtos(), loadOreGeoCache() ]);
+  const treeList = placeTreesReal(treeProtos, ENV_CFG.trees, LAGOON_CENTER.x, LAGOON_CENTER.z, ATOLL_RADIUS);
+  const oreList = placeOresReal(LAGOON_CENTER.x, LAGOON_CENTER.z, ATOLL_RADIUS);
+  buildGrassReal();
+  console.log('[agentview] environment.js 이식 배치 완료 — 나무 '+treeList.length+', 광물 '+oreList.length+', 산 '+MOUNTAINS.length);
+
+  // 노드 객체는 **공유 인스턴스**여야 한다 — carve/broken 상태가 어디서 참조하든 같이 반영돼야 한다.
+  oreList.forEach(o => Object.assign(o, { r:o.r||1.2 }));
+  treeList.forEach(t => Object.assign(t, { r:t.r||1.0 }));
+  // 설계 §2 — 흩어진 자원 중 그때그때 고르던 방식을 버리고 **작업장 구역**으로 모은다.
+  layoutWorkSites(oreList, treeList);
+}
+
+// ══ 채광/벌목 파괴 — 실제 게임 modules/mine.js 이식(CSG carve + Rapier 파편) ══
+//   원본 상수 그대로: CARVE_MAX 8회, 구멍 반경 0.2. 곡괭이가 닿을 때마다 진짜로 부피가 깎이고,
+//   8회째에 조각나면서 광물색 파편이 물리로 튄다. 나무도 같은 방식으로 도끼질마다 패인다.
+// 원본 mine.js는 CARVE_R=0.2 — 다만 그건 곡괭이가 화면을 채우는 1인칭 기준이고, 이 대시보드는 훨씬 먼
+// 쿼터뷰라 같은 구멍이 몇 px로 뭉개져 "패이는 게 안 보인다"(19차 잔디 크기와 같은 관측 거리 문제).
+// 횟수(CARVE_MAX 8)는 원본 그대로 두고 구멍 반경만 이 거리에서 읽히게 키운다.
+const CARVE_MAX = 8, CARVE_R = 0.38;
+const _csgEval = new Evaluator(); _csgEval.useGroups = false;
+// CSG는 두 브러시의 **속성 집합이 정확히 같아야** 동작한다. 광물은 OBJ/FBX 출신이라 uv가 없는 경우가 있어
+// (실패 로그: "Cannot read properties of undefined (reading 'array')") position/normal/uv만 남기고 맞춰준다.
+function normalizeGeoForCSG(geo){
+  const g = geo.clone();
+  g.morphAttributes = {};
+  if (!g.attributes.normal) g.computeVertexNormals();
+  if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count*2), 2));
+  for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv') g.deleteAttribute(k);
+  g.clearGroups();
+  return g;
+}
+const _carveSphereGeo = normalizeGeoForCSG(new THREE.SphereGeometry(0.5, 16, 12));
+const debrisList = []; // {mesh, body, bornAt}
+// 노드 메시를 CSG가 다룰 수 있는 Brush로 한 번만 승격(원본 mine.js도 Brush로 광맥을 세운다).
+function ensureBrush(node){
+  if (!node || !node.mesh || node.brush) return node && node.brush;
+  const src = node.mesh;
+  const b = new Brush(normalizeGeoForCSG(src.geometry), src.material);
+  b.position.copy(src.position); b.rotation.copy(src.rotation); b.scale.copy(src.scale);
+  b.castShadow = b.receiveShadow = true; b.updateMatrixWorld(true);
+  scene.remove(src); scene.add(b);
+  node.brush = b; node.carves = 0;
+  return b;
+}
+// 타격 지점 주변을 얕게 갉는다 — 원본과 동일하게 랜덤 오프셋을 줘 같은 자리를 쳐도 매번 새 부피가 깎인다.
+function carveNode(node, hitPoint, dir){
+  const b = ensureBrush(node);
+  if (!b || node.broken) return;
+  const sp = CARVE_R * 0.7;
+  const center = hitPoint.clone().addScaledVector(dir, CARVE_R * 0.4)
+    .add(new THREE.Vector3((Math.random()-0.5)*sp, (Math.random()-0.5)*sp, (Math.random()-0.5)*sp));
+  const sb = new Brush(_carveSphereGeo, b.material);
+  sb.scale.setScalar(CARVE_R / 0.5); sb.position.copy(center); sb.updateMatrixWorld(true);
+  let result;
+  try { result = _csgEval.evaluate(b, sb, SUBTRACTION); }
+  catch (e) { console.warn('[agentview] CSG 실패', e && e.message); return; }
+  result.material = b.material; result.castShadow = result.receiveShadow = true; result.updateMatrixWorld(true);
+  scene.remove(b); scene.add(result); node.brush = result;
+  spawnChips(hitPoint, 6, b.material.color);
+  node.carves = (node.carves || 0) + 1;
+  if (node.carves >= CARVE_MAX) breakNode(node, hitPoint);
+}
+// ★사령관 지시(2026-08-10) "밑둥 남겨, 광석도 마찬가지" — 실제 게임 mine.js도 광맥을 깨면 그 자리에
+//   `PT_Ore_Rock_01_split.fbx` 그루터기를 광물색으로 남긴다(영구, 페이드 없음). 같은 애셋을 그대로 쓴다.
+let _splitGeo = null, _splitPending = null;
+function loadSplitGeo(){
+  if (_splitGeo) return Promise.resolve(_splitGeo);
+  if (!_splitPending){
+    _splitPending = new FBXLoader().loadAsync(REAL + 'ore/PT_Ore_Rock_01_split.fbx')
+      .then(root => { _splitGeo = toSingleGeo(root, 3.0); return _splitGeo; })
+      .catch(e => { console.warn('[agentview] split 그루터기 로드 실패', e); return null; });
+  }
+  return _splitPending;
+}
+function spawnOreStump(node, gy, mat){
+  loadSplitGeo().then(geo => {
+    if (!geo) return;
+    const stump = new THREE.Mesh(geo, mat ? mat.clone() : new THREE.MeshStandardMaterial({ color: 0x9a9286 }));
+    stump.castShadow = stump.receiveShadow = true;
+    stump.scale.setScalar(0.95 * (node.r ? Math.min(1.6, node.r * 0.7) : 1));
+    stump.position.set(node.x, gy, node.z);
+    stump.rotation.y = Math.random() * Math.PI * 2;
+    const sb = new THREE.Box3().setFromObject(stump);
+    stump.position.y += gy - sb.min.y + 0.12; // 지면 위로 살짝(묻힘 방지) — 원본과 동일
+    scene.add(stump);
+    node.stump = stump;
+  });
+}
+// 조각남 — 원본 breakRock과 같은 구성: 본체 제거 + 그루터기 + 칩 폭발 + 물리 파편.
+function breakNode(node, p){
+  if (node.broken) return;
+  node.broken = true; node.brokenAt = performance.now(); // 리스폰 타이머 시작
+  const mat = node.brush ? node.brush.material : null;
+  const col = mat && mat.color ? mat.color : new THREE.Color(0x9a9286);
+  if (node.brush) scene.remove(node.brush);
+  spawnChips(p, 20, col);
+  const gy = groundAt(node.x, node.z) ?? p.y;
+  spawnOreStump(node, gy, mat);
+  // 파편이 무한 낙하하지 않게 발치에 지면 대용 collider를 깐다(본편은 실제 지형 collider가 받친다).
+  if (physicsWorld && RAPIER && !node.groundBody){
+    const gb = physicsWorld.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(node.x, gy - 0.25, node.z));
+    physicsWorld.createCollider(RAPIER.ColliderDesc.cuboid(3, 0.25, 3), gb);
+    node.groundBody = gb;
+  }
+  const geo = new THREE.IcosahedronGeometry(0.26, 0);
+  for (let i = 0; i < 7; i++){
+    const m = new THREE.Mesh(geo, mat ? mat.clone() : new THREE.MeshStandardMaterial({ color: col }));
+    const pos = new THREE.Vector3(node.x + (Math.random()-0.5)*0.6, p.y + 0.3, node.z + (Math.random()-0.5)*0.6);
+    m.position.copy(pos); m.castShadow = true; scene.add(m);
+    let body = null;
+    if (physicsWorld && RAPIER){
+      body = physicsWorld.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(pos.x, pos.y, pos.z).setLinearDamping(0.25).setAngularDamping(0.4));
+      physicsWorld.createCollider(RAPIER.ColliderDesc.ball(0.26).setDensity(0.5).setFriction(0.85).setRestitution(0.25), body);
+      const ms = body.mass();
+      body.applyImpulse({ x:(Math.random()-0.5)*3.0*ms, y:(2.5+Math.random()*2.0)*ms, z:(Math.random()-0.5)*3.0*ms }, true);
+      body.applyTorqueImpulse({ x:(Math.random()-0.5)*0.7*ms, y:(Math.random()-0.5)*0.7*ms, z:(Math.random()-0.5)*0.7*ms }, true);
+    }
+    debrisList.push({ mesh:m, body, bornAt: performance.now() });
+  }
+}
+// 타격 칩(작은 파편 스프레이) — 원본 spawnChips와 같은 역할. 물리 없이 가볍게 포물선.
+const chips = [];
+const _chipGeo = new THREE.TetrahedronGeometry(0.09, 0);
+function spawnChips(p, n, color){
+  for (let i = 0; i < n; i++){
+    const m = new THREE.Mesh(_chipGeo, new THREE.MeshStandardMaterial({ color: color || 0x9a9286, roughness:0.9 }));
+    m.position.copy(p);
+    scene.add(m);
+    chips.push({ m, v: new THREE.Vector3((Math.random()-0.5)*3.4, 1.6+Math.random()*2.4, (Math.random()-0.5)*3.4), t: 0 });
+  }
+}
+// ══ 벌목 — 실제 게임 modules/axetree.js 이식. 원본은 three-pinata로 밑동을 잘라 위/아래를 분리하지만,
+//   여기서는 절단 없이 **쓰러짐 물리만** 같은 공식으로 재현한다(MAX_CHOPS 5회, 축=up×fallDir,
+//   2.1초에 걸쳐 Math.PI*0.55까지 기울어짐 — 원본 animFall 그대로). 쓰러진 뒤 페이드아웃.
+const MAX_CHOPS = 5;
+const fallingTrees = [];
+function chopNode(node, hitPoint, fromPos){
+  if (node.broken) return;
+  node.chops = (node.chops || 0) + 1;
+  spawnChips(hitPoint, 5, new THREE.Color(0x8a5a32)); // 나뭇조각
+  if (node.chops >= MAX_CHOPS) fellTree(node, fromPos);
+}
+// ★사령관 지시 "밑둥 남겨": 원본 axetree.js는 three-pinata `sliceWorld`로 찍은 높이에서 나무를 잘라
+//   위(쓰러짐)/아래(그루터기)로 나눈다. 여기서는 이미 들어가 있는 CSG로 같은 절단을 한다 —
+//   큰 상자를 절단면 위/아래에 각각 빼서 두 조각을 만든다(결과는 동일하고 의존성 추가가 없다).
+// ★사령관 지적 "잘린 단면이 흰 원반으로 보인다": 원본 axetree.js는 겉(텍스처)과 **단면(목재색 capMat)** 을
+//   분리해 단면에 나무 속살색을 쓴다(`capMat = color 0xcea463, roughness 0.85, DoubleSide`). 그 값 그대로 쓰고,
+//   CSG는 `useGroups=true`로 두면 잘라낸 면에 두 번째 머티리얼이 자동 배정된다.
+const CAP_MAT = new THREE.MeshStandardMaterial({ color: 0xcea463, roughness: 0.85, side: THREE.DoubleSide });
+const _sliceEval = new Evaluator(); _sliceEval.useGroups = true;
+function sliceTreeAt(mesh, cutWorldY){
+  const geo = normalizeGeoForCSG(mesh.geometry);
+  const base = new Brush(geo, mesh.material);
+  base.position.copy(mesh.position); base.rotation.copy(mesh.rotation); base.scale.copy(mesh.scale);
+  base.updateMatrixWorld(true);
+  const BIG = 400;
+  const mk = (centerY) => {
+    const b = new Brush(normalizeGeoForCSG(new THREE.BoxGeometry(BIG, BIG, BIG)), CAP_MAT);
+    b.position.set(mesh.position.x, centerY, mesh.position.z); b.updateMatrixWorld(true);
+    return b;
+  };
+  let top = null, stump = null;
+  try {
+    top   = _sliceEval.evaluate(base, mk(cutWorldY - BIG/2), SUBTRACTION); // 절단면 아래를 빼면 윗동
+    base.updateMatrixWorld(true);
+    stump = _sliceEval.evaluate(base, mk(cutWorldY + BIG/2), SUBTRACTION); // 절단면 위를 빼면 밑동
+  } catch (e) { console.warn('[agentview] 나무 절단 실패', e && e.message); return null; }
+  // useGroups 결과는 [겉 재질, 단면 재질] 2머티리얼 — 겉은 원본 나무 텍스처, 단면은 목재색
+  const mats = [Array.isArray(mesh.material) ? mesh.material[0] : mesh.material, CAP_MAT];
+  for (const o of [top, stump]) if (o){ o.material = mats; o.castShadow = o.receiveShadow = true; }
+  return { top, stump };
+}
+// 원본 axetree.js `cutTree` 구조 그대로:
+//   ① 절단면(cutY)에서 자른다 → 아래=그루터기(그 자리에 고정) / 위=쓰러짐
+//   ② 쓰러지는 쪽은 **절단면을 경첩(pivot)** 으로 회전한다(지면이 아니라 잘린 자리에서 넘어간다)
+//   ③ 절단 실패 시 통째로 경첩 회전(원본도 같은 폴백을 둔다 — 절단은 못해도 쓰러짐은 보장)
+function fellTree(node, fromPos){
+  if (node.broken || !node.mesh) return;
+  node.broken = true; node.brokenAt = performance.now(); // 리스폰 타이머 시작
+  const src = node.mesh;
+  const gy = groundAt(node.x, node.z) ?? src.position.y;
+  // 원본: cutY = max(gy+0.5, hitY) — 찍은 높이에서 자른다
+  const cutY = Math.max(gy + 0.5, gy + Math.max(0.7, (node.r || 1) * 1.1));
+  // 쓰러짐 방향 = 베는 사람 → 나무(실제 벌목처럼 베는 반대편으로 넘어간다)
+  const dx = node.x - (fromPos ? fromPos.x : node.x - 1);
+  const dz = node.z - (fromPos ? fromPos.z : node.z);
+  const L = Math.hypot(dx, dz) || 1;
+  const dir = { x: dx/L, z: dz/L };
+  const pivot = new THREE.Vector3(node.x, cutY, node.z); // ★경첩은 절단면(지면 아님)
+
+  const cut = sliceTreeAt(src, cutY);
+  scene.remove(src);
+  // ★버그(사령관 "나무 쓰러지는데 그대로 나무가 있고"): 절단해놓고 정작 **원본**을 쓰러뜨리고
+  //   잘린 윗동은 제자리에 세워뒀었다. 쓰러뜨릴 대상은 반드시 절단된 윗동이어야 한다.
+  let fallSrc = src, stump = null;
+  if (cut && cut.top && cut.stump){ fallSrc = cut.top; stump = cut.stump; }
+  if (stump){ scene.add(stump); node.stump = stump; }
+
+  // 원본 animFall과 동일 — 지오메트리를 월드로 편 뒤 경첩 기준으로 옮겨 그룹에 담는다.
+  fallSrc.updateMatrixWorld(true);
+  const wg = fallSrc.geometry.clone();
+  wg.applyMatrix4(fallSrc.matrixWorld);
+  wg.translate(-pivot.x, -pivot.y, -pivot.z);
+  const mats = Array.isArray(fallSrc.material) ? fallSrc.material.map(mm => mm.clone()) : fallSrc.material.clone();
+  const grp = new THREE.Group();
+  grp.position.copy(pivot);
+  const fm = new THREE.Mesh(wg, mats);
+  fm.castShadow = fm.receiveShadow = true;
+  grp.add(fm);
+  scene.add(grp);
+
+  fallingTrees.push({ grp, axis: new THREE.Vector3(dir.z, 0, -dir.x).normalize(),
+    t: 0, dur: 2.1, max: Math.PI*0.55, bornAt: performance.now(), impacted: false });
+  node.fallen = grp;
+}
+function tickFalling(dt){
+  const now = performance.now();
+  for (let i = fallingTrees.length-1; i >= 0; i--){
+    const f = fallingTrees[i];
+    if (f.t < f.dur){
+      f.t += dt;
+      const k = Math.min(1, f.t/f.dur);
+      const e = k*k*(3-2*k); // ease — 처음엔 천천히 기울다 끝에 쿵
+      f.grp.quaternion.setFromAxisAngle(f.axis, f.max * e);
+      if (!f.impacted && k >= 1){
+        f.impacted = true;
+        // 착지 임팩트 — 원본은 쿵 소리+먼지. 여기선 먼지(칩)만.
+        const p = f.grp.position.clone(); p.y += 0.4;
+        spawnChips(p, 10, new THREE.Color(0x9c8f74));
+      }
+    }
+    const age = (now - f.bornAt)/1000;
+    if (age > 9){
+      f.grp.traverse(o => { if (o.isMesh && o.material){ o.material.transparent = true; o.material.opacity = Math.max(0, 1-(age-9)*0.6); o.material.depthWrite = false; } });
+      if (age > 11){ scene.remove(f.grp); fallingTrees.splice(i,1); }
+    }
+  }
+}
+function tickMining(dt){
+  tickFalling(dt);
+  respawnSites(performance.now()); // 다 캔 자원은 같은 자리에 다시 자란다(설계 §2)
+  // 칩: 중력 포물선 → 0.9초 뒤 소멸
+  for (let i = chips.length-1; i >= 0; i--){
+    const c = chips[i];
+    c.t += dt; c.v.y -= 20*dt;
+    c.m.position.addScaledVector(c.v, dt);
+    if (c.t > 0.9){ scene.remove(c.m); c.m.material.dispose(); chips.splice(i,1); }
+  }
+  if (physicsWorld) physicsWorld.step();
+  // 파편: 물리 위치 동기 + 7초 뒤 페이드, 8.5초에 제거(원본과 동일한 수명)
+  const now = performance.now();
+  for (let i = debrisList.length-1; i >= 0; i--){
+    const d = debrisList[i];
+    if (d.body){ const t = d.body.translation(), q = d.body.rotation();
+      d.mesh.position.set(t.x, t.y, t.z); d.mesh.quaternion.set(q.x, q.y, q.z, q.w); }
+    const age = (now - d.bornAt)/1000;
+    if (age > 7){
+      const o = Math.max(0, 1-(age-7)*0.7);
+      d.mesh.material.transparent = true; d.mesh.material.opacity = o; d.mesh.material.depthWrite = false;
+      if (age > 8.5){
+        scene.remove(d.mesh); d.mesh.material.dispose();
+        if (d.body && physicsWorld){ try { physicsWorld.removeRigidBody(d.body); } catch(e){} }
+        debrisList.splice(i,1);
+      }
+    }
+  }
+}
+window.__carveNode = carveNode; // 디버그 훅
+window.__chopNode = (n,p,f) => chopNode(n,p,f); // 디버그 훅(벌목)
+window.__nodes = () => NODES;   // 디버그 훅(광물/나무 노드 목록)
+
+// ══════════════ 작업장 (설계안 §2) ══════════════
+// 지금까지는 섬 전역에 흩어진 자원 중 가까운 것을 그때그때 고르고, 안 맞으면 거리·가시성 필터를 덧붙이는
+// 식이었다. 그래서 "화면 밖에서 일한다 / 벌목을 안 한다 / 고갈된다"가 반복됐다.
+// 광산·숲을 **활동권 안 고정 구역**으로 정의하고, 그 구역 안에만 자원을 모아둔다. 다 캐면 같은 자리에
+// 다시 자라난다(리스폰) — 에이전트가 응답할 때까지 계속 일할 수 있어야 하므로 고갈되면 안 된다.
+const RESPAWN_MS = 12000;
+const WORK_SITES = {
+  // ★사령관 "벌목이랑 광물 캐는 건 어디 감?"(2026-08-11) — 퍼뜨리다가 1.30/1.55까지 밀어 자원이
+  //   화면 가장자리로 나가버렸다. 대장간·시장보다 살짝 뒤(안쪽)에 두어 둘 다 보이게 한다.
+  ore:    { angle: Math.PI*0.74, spread: 1.06, radius: 7.5, want: 9, members: [] }, // 화면 좌 = 광산
+  forage: { angle: Math.PI*0.26, spread: 1.30, radius: 9.0, want: 9, members: [] }, // 화면 우 = 숲
+};
+function layoutWorkSites(oreList, treeList){
+  for (const key of ['ore','forage']){
+    const s = WORK_SITES[key];
+    const c = frameEllipse(s.angle, FRAME_R * s.spread);
+    const land = landInFrame(c.x, c.z);
+    s.cx = land.x; s.cz = land.z;
+  }
+  gatherIntoSite(oreList, WORK_SITES.ore, true);
+  gatherIntoSite(treeList, WORK_SITES.forage, false);
+  console.log('[agentview] 작업장 — 광산('+WORK_SITES.ore.members.length+') 숲('+WORK_SITES.forage.members.length+')');
+  window.__sites = WORK_SITES; // 디버그 훅
+}
+// 구역에서 가까운 것들을 골라 **구역 안에 고르게** 재배치한다(원본 배치 개수는 유지, 위치만 모은다).
+function gatherIntoSite(list, site, isOre){
+  const d2 = n => Math.hypot(n.x - site.cx, n.z - site.cz);
+  const chosen = list.filter(n => !n.broken).sort((a,b) => d2(a) - d2(b)).slice(0, site.want);
+  chosen.forEach((n, i) => {
+    const ang = (i / chosen.length) * Math.PI*2 + (isOre ? 0.4 : 1.1);
+    const rad = site.radius * (0.30 + 0.70 * (((i*5) % chosen.length) / chosen.length));
+    const land = findLandNear(site.cx + Math.cos(ang)*rad, site.cz + Math.sin(ang)*rad);
+    const gy = groundAt(land.x, land.z);
+    n.x = land.x; n.z = land.z; n.y = gy ?? n.y;
+    n.site = site;
+    if (n.mesh){
+      n.mesh.position.set(land.x, (gy ?? 0) + (isOre ? -0.1 : 0), land.z);
+      // 작업장은 카메라 코앞이라 원본 높이(15~30)면 화면 위를 통째로 덮는다 — 이 구역 나무만 낮춘다
+      // (배경의 숲은 원본 크기 그대로 유지해서 원경 실루엣은 안 바뀐다).
+      if (!isOre){
+        const bb = new THREE.Box3().setFromObject(n.mesh);
+        const h = bb.max.y - bb.min.y;
+        if (h > 13) n.mesh.scale.multiplyScalar(13 / h);
+        n.r = Math.max(0.8, n.r * Math.min(1, 13 / Math.max(h, 0.001)));
+      }
+      n.origMesh = n.mesh; // 리스폰 때 되살릴 원본
+    }
+  });
+  site.members = chosen;
+}
+// 다 캔 자원은 잠시 뒤 같은 자리에 다시 자란다 — 그루터기는 치우고 원본 메시를 되돌린다.
+function respawnSites(now){
+  for (const key of ['ore','forage']){
+    for (const n of WORK_SITES[key].members){
+      if (!n.broken || !n.brokenAt || now - n.brokenAt < RESPAWN_MS) continue;
+      if (n.stump){ scene.remove(n.stump); n.stump = null; }
+      if (n.fallen){ scene.remove(n.fallen); n.fallen = null; }
+      if (n.brush){ scene.remove(n.brush); n.brush = null; }
+      if (n.origMesh){
+        n.origMesh.position.set(n.x, (groundAt(n.x, n.z) ?? 0) + (key === 'ore' ? -0.1 : 0), n.z);
+        scene.add(n.origMesh);
+        n.mesh = n.origMesh;
+      }
+      n.broken = false; n.brokenAt = 0; n.carves = 0; n.chops = 0;
+    }
+  }
+}
+function pickNode(category){
+  if (category === 'ore' || category === 'forage'){
+    const alive = WORK_SITES[category].members.filter(n => !n.broken);
+    if (alive.length) return alive[Math.floor(Math.random()*alive.length)];
+    // 전부 캐낸 순간 — 리스폰 전이면 본부로 보내 놀지 않게 한다
+    return NODES.base[Math.floor(Math.random()*NODES.base.length)];
+  }
+  // 제작(build) 목적지는 건물이다. 중심을 목표로 주면 **이미 건물 앞에 서 있는 워커는 출발하자마자 도착**해
+  // TRAVEL>IDLE만 반복하며 벽에 붙어 제자리걸음을 한다(사령관 "벽에 아직도 박고 있는 애가 있음").
+  // 매번 건물 둘레의 다른 자리를 잡아 그쪽으로 걸어가 망치질하게 한다 — 목수가 집을 돌며 짓는 그림이 된다.
+  // 건물 작업장(대장간·제재소·시장) — 건물 앞 고정 작업 지점으로 보낸다. 대장간은 모루 앞.
+  if (WORK_SPOT[category]){
+    const s = WORK_SPOT[category];
+    return { x: s.x, z: s.z, r: 0, face: s.anvil || { x: s.buildingX, z: s.buildingZ } };
+  }
+  if (category === 'build' && buildSiteRadius > 0 && buildSitePos){
+    const ang = Math.random() * Math.PI * 2;
+    const rr = buildSiteRadius + 1.6;
+    return { x: buildSitePos.x + Math.cos(ang)*rr, z: buildSitePos.z + Math.sin(ang)*rr, r: 0 };
+  }
+  const list = NODES[category] || NODES.base;
+  return list[Math.floor(Math.random()*list.length)];
+}
+
+// ══ 건설 현장 — 사령관 지시(2026-08-08): "가운데 건물이 고스트 상태에서 점점 채워지며 완성, 완성되면
+//   토큰 얼마나 썼는지 보이면 됨" — NODES.build[0](제작 워커가 실제로 가는 그 자리)에 항상 떠 있는 반투명
+//   청사진 위에, 가장 토큰을 많이 쓴 진행중 job의 진행률만큼 실물이 아래에서부터 차오른다.
+const ENV_BASE = './assets/env/';
+let buildSiteSolid = null, buildSiteHeight = 11, buildSitePos = null; // ★사령관 "건물이 너무작음"(2026-08-08) — 캐릭터 기준(1.5) 4배(6)→7배(11)로 확대
+let buildSiteClip = null, buildSiteGhost = null, buildSiteGroundY = 0, buildFillShown = 0; // 게이지 절단면·고스트·표시중 진행률(부드럽게 따라감)
+let buildSiteRadius = 0; // 건물 발자국 반경 — 워커가 통과하지 못하게 막는 경계
+const buildCompletedJobs = new Set();
+// 건물 한 채에 필요한 납품 횟수 — 워커가 실제로 캐 와서 내려놓은 만큼만 게이지가 오른다.
+const DELIVERIES_PER_BUILDING = 16;
+let deliveredCount = 0;
+
+// ══════ 마을 작업장 — ★사령관 지시(2026-08-11) ══════
+// "집만 짓는 게 아니라 대장간 건물 앞에서 모루에서 작업하는 애도 있어야 할 것 같고 그런 느낌"
+// 실제 게임 settlement.js가 쓰는 KayKit Hexagon 건물(대장간·제재소·시장)을 활동권 안에 세우고,
+// 각 건물 앞에 워커가 서는 작업 지점을 만든다. 대장간 앞에는 모루(kenney workbench-anvil)를 놓는다.
+const WORK_BUILDINGS = {
+  // 각도는 frameEllipse 기준: 0.20π=화면 우, 0.50π=중앙 위, 0.80π=화면 좌. π~2π는 카메라 앞쪽이라
+  // 화면 아래로 잘린다(첫 시도에서 smith y=-0.85, trade y=-0.98로 밀려 실측 후 0~π 구간으로 옮김).
+  // ★사령관 지적(2026-08-11) "건물들이 사람에 비해서 너무 작음" — 캐릭터 1.5m 기준 7~8m는 2층집도 안 됐다.
+  //   실제 마을 스케일로 키운다(건설현장 집 11m와 어울리는 13~15m).
+  // ★사령관 지적(2026-08-11) "조금 멀리 퍼지게 해야 하지 않나, 전체적으로 퍼지게 배치" —
+  //   건물이 중앙(건설현장)에 몰려 답답했다. spread를 키워 활동권 가장자리로 밀고 각도도 벌린다.
+  //   단 너무 벌리면 양끝이 잘린다(spread 1.05에서 대장간·시장이 화면 밖으로 반쯤 나감) — 0.86으로 되돌림.
+  smith: { file:'building_blacksmith_blue.gltf', name:'대장간', angle: Math.PI*0.94, spread: 0.86, height: 13.5, anvil: true },
+  saw:   { file:'building_lumbermill_blue.gltf', name:'제재소', angle: Math.PI*0.50, spread: 1.55, height: 15.0 },
+  trade: { file:'building_market_blue.gltf',     name:'시장',   angle: Math.PI*0.06, spread: 0.90, height: 13.0 },
+};
+// 각 작업장의 워커 작업 지점(건물 앞) — pickNode가 목적지로 쓴다.
+const WORK_SPOT = {};
+async function loadWorkBuildings(){
+  const gl = new GLTFLoader();
+  for (const key in WORK_BUILDINGS){
+    const b = WORK_BUILDINGS[key];
+    const c = frameEllipse(b.angle, FRAME_R * b.spread);
+    const land = landInFrame(c.x, c.z);
+    const gy = groundAt(land.x, land.z) ?? 0;
+    let root;
+    try { root = await new Promise((res, rej) => gl.load(REAL + 'buildings/' + b.file, g => res(g.scene), undefined, rej)); }
+    catch (e){ console.warn('[agentview] 작업장 건물 로드 실패', b.file, e); continue; }
+    root.traverse(o => { if (o.isMesh){ o.castShadow = true; o.receiveShadow = true; if (o.material && o.material.map) o.material.map.colorSpace = THREE.SRGBColorSpace; } });
+    const bb0 = new THREE.Box3().setFromObject(root);
+    const sz = new THREE.Vector3(); bb0.getSize(sz);
+    root.scale.setScalar(b.height / (sz.y || 1));
+    const bb = new THREE.Box3().setFromObject(root);
+    const ctr = bb.getCenter(new THREE.Vector3());
+    root.position.x -= ctr.x; root.position.z -= ctr.z; root.position.y -= bb.min.y;
+    const grp = new THREE.Group(); grp.add(root); grp.position.set(land.x, gy, land.z);
+    // 건물이 카메라를 향하도록 — 정면(문·좌판)이 보여야 앞에서 일하는 그림이 산다
+    grp.rotation.y = Math.atan2(camera.position.x - land.x, camera.position.z - land.z);
+    scene.add(grp);
+
+    const fs = new THREE.Vector3(); new THREE.Box3().setFromObject(grp).getSize(fs);
+    const foot = Math.max(fs.x, fs.z) * 0.5;
+    // 작업 지점 = 건물 정면(카메라 쪽)으로 발자국 반경만큼 나온 자리
+    const dx = camera.position.x - land.x, dz = camera.position.z - land.z;
+    const L = Math.hypot(dx, dz) || 1;
+    const sx = land.x + (dx/L) * (foot + 1.8), sz2 = land.z + (dz/L) * (foot + 1.8);
+    const spot = findLandNear(sx, sz2);
+    WORK_SPOT[key] = { x: spot.x, z: spot.z, r: 0, buildingX: land.x, buildingZ: land.z, foot };
+    addObstacle(land.x, land.z, foot * 0.72); // 워커가 통과 못 하게 — 실측 발자국은 지붕 처마까지라 몸통 기준으로 줄인다
+
+    if (b.anvil){
+      try {
+        const ag = await new Promise((res, rej) => gl.load(REAL + 'buildings/workbench-anvil.glb', g => res(g.scene), undefined, rej));
+        // ★사령관 지적(2026-08-11) "모루 조금 더 키우는데 지금 흰색으로 되어 있음" — kenney 모델은 GLB에
+        //   텍스처가 없어 공유 colormap을 직접 물려야 한다(도구 장착 때와 같은 처리). 안 물리면 흰 덩어리.
+        const cmap = toolColormap();
+        ag.traverse(o => {
+          if (!o.isMesh) return;
+          o.castShadow = true; o.receiveShadow = true;
+          o.material = o.material.clone();
+          o.material.map = cmap; o.material.color.setHex(0xffffff);
+          o.material.metalness = 0.25; o.material.roughness = 0.65;
+          o.material.needsUpdate = true;
+        });
+        const ab = new THREE.Box3().setFromObject(ag); const asz = new THREE.Vector3(); ab.getSize(asz);
+        ag.scale.setScalar(1.9 / (asz.y || 1));   // 캐릭터 1.5m 기준 가슴 높이 — 먼 쿼터뷰에서 읽히도록 키움
+        const ab2 = new THREE.Box3().setFromObject(ag); ag.position.y -= ab2.min.y;
+        // 워커와 건물 사이, 살짝 옆으로 — 워커가 모루를 마주보고 두드리는 배치
+        const px = spot.x + (dx/L) * 0.9, pz = spot.z + (dz/L) * 0.9;
+        const anvilPos = findLandNear(px, pz);
+        ag.position.x += anvilPos.x; ag.position.z += anvilPos.z;
+        ag.position.y += groundAt(anvilPos.x, anvilPos.z) ?? gy;
+        ag.rotation.y = grp.rotation.y;
+        scene.add(ag);
+        WORK_SPOT[key].anvil = { x: anvilPos.x, z: anvilPos.z };
+      } catch (e){ console.warn('[agentview] 모루 로드 실패', e); }
+    }
+    console.log('[agentview] 작업장 건물 —', b.name, '발자국', foot.toFixed(1), '작업지점', spot.x.toFixed(1), spot.z.toFixed(1));
+  }
+  window.__workSpots = WORK_SPOT; // 디버그 훅
+}
+
+async function loadBuildSite(){
+  const pos = NODES.build[0];
+  buildSitePos = pos;
+  const gy = groundAt(pos.x, pos.z) ?? 0;
+  const gl = new GLTFLoader();
+  // 내섬관리 실제 건물 에셋(KayKit Hexagon, settlement.js가 쓰는 것과 동일 파일군) — Kenney 플레이스홀더 대체.
+  // ★사령관 지적(2026-08-08 "장식 아직도 보이는데 고스트가아니라?"): market은 좌판·천막·자루더미처럼 얇고
+  //   겹치는 장식 메시가 많아, opacity=0.5 반투명 고스트로 렌더하면 겹친 레이어마다 불투명도가 누적되어
+  //   특정 부위만 유독 진하게(거의 불투명하게) 보이는 렌더링 아티팩트가 생겼다. 장식이 거의 없는 단순한
+  //   단일 볼륨 건물(home_A)로 교체 — 같은 반투명 고스트 기법이라도 겹치는 면이 적어야 깨끗하게 읽힌다.
+  const base = await new Promise((res, rej) => gl.load(REAL + 'buildings/building_home_A_blue.gltf', g => res(g.scene), undefined, rej));
+  base.traverse(o => { if (o.isMesh && o.material && o.material.map) o.material.map.colorSpace = THREE.SRGBColorSpace; });
+
+  const measure = new THREE.Box3().setFromObject(base);
+  const sz = new THREE.Vector3(); measure.getSize(sz);
+  const scale = buildSiteHeight / (sz.y || 1);
+
+  // 고스트(청사진) — settlement.js ghostShow()와 동일 기법: 와이어프레임이 아니라 원본 메시를 그대로
+  // 반투명 복제(opacity 0.5, depthWrite off) + emissive 틴트. 실제 게임 고스트가 이 방식이다.
+  const ghost = base.clone(true);
+  ghost.traverse(o => {
+    if (!o.isMesh) return;
+    o.material = o.material.clone();
+    o.material.transparent = true; o.material.opacity = 0.5; o.material.depthWrite = false;
+    if (o.material.emissive) o.material.emissive.setHex(0xffcf6b);
+    if ('emissiveIntensity' in o.material) o.material.emissiveIntensity = 0.5;
+  });
+  ghost.scale.setScalar(scale);
+  // ★사령관 "집이 가운데 구도로 와야하고"(2026-08-08) — home_A 모델 원점이 발자국 중심이 아니라 한쪽으로
+  // 치우쳐 있어, Y만 바닥에 맞추면 X/Z가 카메라 타겟(=화면 중앙)에서 옆으로 밀려 보였다. XZ도 바운딩박스
+  // 중심으로 맞춘다.
+  const gb = new THREE.Box3().setFromObject(ghost);
+  const gc = gb.getCenter(new THREE.Vector3());
+  ghost.position.x -= gc.x; ghost.position.z -= gc.z; ghost.position.y -= gb.min.y;
+  const ghostGroup = new THREE.Group(); ghostGroup.add(ghost); ghostGroup.position.set(pos.x, gy, pos.z);
+  scene.add(ghostGroup);
+
+  // 실물 — ★사령관 지적(2026-08-10): "건물이 저렇게 세워지는 게 아님. 밑에서 고스트 게이지가 차서 마지막에
+  //   완성되는 형태". 기존 Y스케일 성장은 집 전체가 눌린 채 늘어나서(지붕이 납작하게 깔린 채 자람) 완전히
+  //   다른 그림이었다. 형태는 처음부터 온전히 두고 **아래에서 위로 차오르는 수평 절단면**으로 바꾼다 —
+  //   three의 로컬 클리핑 평면으로 "이 높이 아래만 렌더"하면 물이 차오르듯 채워진다.
+  const solid = base.clone(true);
+  const clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), gy); // 평면 아래쪽(y ≤ constant)만 보인다
+  solid.traverse(o => {
+    if (!o.isMesh) return;
+    o.castShadow = true; o.receiveShadow = true;
+    o.material = o.material.clone();
+    o.material.clippingPlanes = [clipPlane];
+    o.material.clipShadows = true;
+    o.material.side = THREE.DoubleSide; // 절단면 너머 안쪽 벽이 뚫려 보이지 않게
+  });
+  solid.scale.setScalar(scale);
+  const sb = new THREE.Box3().setFromObject(solid);
+  const sc = sb.getCenter(new THREE.Vector3());
+  solid.position.x -= sc.x; solid.position.z -= sc.z; solid.position.y -= sb.min.y;
+  const solidGroup = new THREE.Group(); solidGroup.add(solid); solidGroup.position.set(pos.x, gy, pos.z);
+  solidGroup.visible = false; // 첫 poll 전까지 아무것도 안 보이게(고스트만 뜬 상태로 시작)
+  scene.add(solidGroup);
+
+  // ★사령관 지적(2026-08-10) "투명으로 집을 뚫고 들어가면 안 되지 않나" — 워커 이동이 직선 보간이라
+  //   건설 현장 한가운데를 그대로 통과했다(고스트든 실물이든 뚫고 지나가면 안 된다). 실측 발자국 반경을
+  //   저장해 두고, 이동할 때 그 원 밖으로 밀어낸다.
+  const fb = new THREE.Box3().setFromObject(solidGroup);
+  const fsz = new THREE.Vector3(); fb.getSize(fsz);
+  buildSiteRadius = Math.max(fsz.x, fsz.z) * 0.5 + 0.6;
+  addObstacle(pos.x, pos.z, buildSiteRadius); // 장애물 목록에 등록(작업장 건물과 같은 규칙으로 처리)
+  window.__buildR = buildSiteRadius; // 디버그 훅
+
+  buildSiteSolid = solidGroup;
+  buildSiteClip = clipPlane;
+  buildSiteGhost = ghostGroup;
+  buildSiteGroundY = gy;
+  window.__buildSiteSolid = solidGroup; // 디버그 훅
+}
+
+// ★사령관 지시(2026-08-11) "에이전트 돌리잖아 그러면 그 돌리는 양만큼 워커들이 일해,
+//   그러면 에이전트 작업 종료하면 그거에 맞춰서 건물 올라가야 함" —
+//   건물은 **한 에이전트(세션)의 일**이다. 그 에이전트가 도는 동안 워커들이 자재를 나르며 게이지가 오르고,
+//   그 에이전트가 실제로 끝나는 순간(done/completed) 건물이 완성된다.
+//   그래서 납품 게이지에는 상한을 둔다 — 아무리 많이 날라도 에이전트가 안 끝났으면 완성되지 않는다.
+const BUILD_FILL_CAP = 0.92;
+const JOB_DONE_STATES = new Set(['done', 'completed']);
+const JOB_DEAD_STATES = new Set(['failed', 'error', 'killed']);
+let buildOwnerId = null, buildOwnerName = '';
+function updateBuildSite(jobs){
+  if (!buildSiteSolid) return;
+  if (buildDoneAt) return; // 완성 연출 중에는 손대지 않는다
+  // ★사령관 "고스트 아래 머가 보인다" — 진행률 0일 때도 scale.y를 0.001로만 낮췄지 완전히 안 없앴다.
+  //   0.001이라도 스케일>0이면 납작하게 눌린 실물 바닥면이 고스트 밑에서 계속 비쳐 보인다. visible 자체를
+  //   꺼서 진행 중인 job이 없으면 아예 렌더 안 되게 한다(고스트 반투명 청사진만 남음).
+  // ★사령관 지적(2026-08-10) "아직 완성이 안 됐는데 고스트가 끝남" — 진행률이 `job.tokens/50000`이라
+  //   세션 토큰이 수십만이면 **시작하자마자 100%** 였다. 화면의 노동과 건물이 아무 관계가 없었던 것.
+  //   설계안 §5대로 **워커가 실제로 납품한 횟수**로 바꾼다 — 캐 와서 내려놔야만 게이지가 오른다.
+  const byId = new Map(jobs.map(j => [j.jobId, j]));
+  let owner = buildOwnerId ? byId.get(buildOwnerId) : null;
+
+  if (owner && JOB_DONE_STATES.has(owner.state)){
+    // ★그 에이전트가 작업을 끝냈다 = 건물 완성. 남은 게이지는 한 번에 차오른다.
+    buildDoneAt = performance.now();
+    buildDoneTokens = owner.tokens || 0;
+    buildDoneName = buildOwnerName;
+    buildTargetFill = 1;
+    buildOwnerId = null;
+    return;
+  }
+  // 주인이 없거나(첫 실행) 죽었으면(failed) 새로 뽑는다 — 지금 실제로 돌고 있는 job 중 토큰 최다
+  if (!owner || JOB_DEAD_STATES.has(owner.state)){
+    if (owner) { deliveredCount = 0; buildTargetFill = 0; buildFillShown = 0; } // 실패한 일감은 처음부터
+    const cand = jobs.filter(j => j.state === 'active').sort((a,b) => (b.tokens||0)-(a.tokens||0))[0]
+              || jobs.filter(j => !JOB_DONE_STATES.has(j.state) && !JOB_DEAD_STATES.has(j.state))[0];
+    buildOwnerId = cand ? cand.jobId : null;
+    buildOwnerName = cand ? String(cand.name || cand.jobId) : '';
+  }
+  // 게이지 = 워커가 실제로 나른 양(=에이전트가 도는 양). 단 상한까지만 — 완성은 에이전트가 끝내야 한다.
+  buildTargetFill = Math.min(BUILD_FILL_CAP, deliveredCount / DELIVERIES_PER_BUILDING);
+}
+
+// 게이지는 매 프레임 목표치를 부드럽게 따라간다(폴링 간격 1초마다 뚝뚝 끊기지 않게).
+let buildTargetFill = 0, buildDoneAt = 0, buildDoneTokens = 0, buildDoneName = '';
+function tickBuildSite(dt){
+  if (!buildSiteSolid || !buildSiteClip) return;
+  buildFillShown += (buildTargetFill - buildFillShown) * Math.min(1, dt * 2.2);
+  const filled = buildFillShown > 0.004;
+  buildSiteSolid.visible = filled;
+  // 절단면 높이 = 바닥 + 건물높이×진행률. 이 높이 아래만 렌더되므로 물이 차오르듯 채워진다.
+  buildSiteClip.constant = buildSiteGroundY + buildSiteHeight * buildFillShown;
+  // 완성되면 고스트(청사진)를 걷어내고 실물만 남긴다 — "마지막에 완성되는 형태".
+  if (buildDoneAt) {
+    const since = (performance.now() - buildDoneAt) / 1000;
+    if (buildGhostFade < 1) {
+      buildGhostFade = Math.min(1, buildGhostFade + dt * 0.9);
+      if (buildSiteGhost) buildSiteGhost.traverse(o => {
+        if (o.isMesh && o.material) o.material.opacity = 0.5 * (1 - buildGhostFade);
+      });
+    }
+    if (since > 0.4 && !buildDonePopped) {
+      buildDonePopped = true;
+      spawnYieldPopup(buildSitePos.x, buildSiteGroundY + buildSiteHeight + 3, buildSitePos.z,
+        '완성 · ' + (buildDoneName || '에이전트') + ' · ' + fmtTok(buildDoneTokens), '#ffe27a');
+    }
+    // 다음 건물을 위해 리셋 — 고스트가 다시 떠오르고 게이지는 0부터
+    if (since > 6) {
+      buildDoneAt = 0; buildDonePopped = false; buildGhostFade = 0;
+      buildFillShown = 0; buildTargetFill = 0;
+      deliveredCount = 0; // 다음 건물은 다시 0채부터 — 납품이 쌓여야 올라간다
+      if (buildSiteGhost) buildSiteGhost.traverse(o => { if (o.isMesh && o.material) o.material.opacity = 0.5; });
+    }
+  }
+}
+let buildGhostFade = 0, buildDonePopped = false;
+
+function makeLabelSprite(w, hpx){
+  const cv = document.createElement('canvas');
+  cv.width = 256; cv.height = hpx || 64;
+  const ctx = cv.getContext('2d');
+  const tex = new THREE.CanvasTexture(cv);
+  const mat = new THREE.SpriteMaterial({ map: tex, depthTest:false, transparent:true });
+  const spr = new THREE.Sprite(mat);
+  spr.scale.set(w||6, (hpx||64)/(256/(w||6)), 1);
+  return { spr, cv, ctx, tex };
+}
+
+function drawText(label, text, color, size){
+  const { ctx, cv, tex } = label;
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.fillStyle = 'rgba(10,14,8,0.72)';
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(2,2,cv.width-4,cv.height-4,10); else ctx.rect(2,2,cv.width-4,cv.height-4);
+  ctx.fill();
+  ctx.fillStyle = color;
+  ctx.font = `${size}px system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, cv.width/2, cv.height/2);
+  tex.needsUpdate = true;
+}
+
+// 세션 제목처럼 길이가 제각각인 문자열용 — 캔버스(256px) 안에 들어가도록 글자 크기를 줄여가며 맞춘다.
+function drawTextFit(label, text, color, maxSize){
+  const { ctx } = label;
+  let size = maxSize || 20;
+  ctx.font = `${size}px system-ui, sans-serif`;
+  while (size > 10 && ctx.measureText(text).width > 240){
+    size -= 1;
+    ctx.font = `${size}px system-ui, sans-serif`;
+  }
+  drawText(label, text, color, size);
+}
+
+function drawBar(label, ratio, color){
+  const { ctx, cv, tex } = label;
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.fillStyle = 'rgba(10,14,8,0.55)';
+  ctx.fillRect(0, cv.height*0.35, cv.width, cv.height*0.3);
+  ctx.fillStyle = color;
+  ctx.fillRect(0, cv.height*0.35, cv.width*Math.max(0,Math.min(1,ratio)), cv.height*0.3);
+  tex.needsUpdate = true;
+}
+
+const workers = new Map(); // jobId -> worker
+window.__workers = workers; window.__sendToWork = sendToWork; window.__spawnYieldPopup = spawnYieldPopup; // 디버그 훅
+const mixers = [];
+
+// 이미 서 있는 워커와 너무 가까운 자리인지 — 활성 세션까지 워커로 잡으면서 인원이 늘어 겹침이 잦아졌다.
+function tooCloseToWorkers(x, z, r){
+  for (const v of workers.values()) {
+    const dx = v.group.position.x - x, dz = v.group.position.z - z;
+    if (dx*dx + dz*dz < r*r) return true;
+  }
+  return false;
+}
+function baseWorker(jobId, isTransient){
+  const group = new THREE.Group();
+  let p = hashPos(jobId);
+  // 해시 자리가 이미 찬 경우 접미사를 바꿔 다른 자리를 찾는다(결정적이라 새로고침해도 같은 결과).
+  for (let k = 0; k < 10 && !isTransient && tooCloseToWorkers(p.x, p.z, 6.5); k++) p = hashPos(jobId + '~' + k);
+  const jp = isTransient ? findLandNear(p.x + (Math.random()*4-2), p.z + (Math.random()*4-2)) : p;
+  const jy = (jp.y != null ? jp.y : groundAt(jp.x, jp.z)) ?? 0.3;
+  group.position.set(jp.x, jy + 0.02, jp.z);
+  scene.add(group);
+
+  // 로드 전까지 보여줄 임시 캡슐(로드 실패해도 최소한 상태색은 보이도록 유지)
+  const placeholder = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.6, 1.2, 4, 8),
+    new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.6 })
+  );
+  placeholder.position.y = 1.2;
+  group.add(placeholder);
+
+  // 클릭 판정용 보이지 않는 히트박스 — 캐릭터는 SkinnedMesh라 레이캐스트가 **바인드 포즈** 기준으로
+  // 계산돼 애니메이션 중인 실제 위치와 어긋난다(실측: 클릭이 한 번도 안 잡혔다). 단순 실린더로 받는다.
+  const hitbox = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.85, 0.85, 2.4, 10),
+    new THREE.MeshBasicMaterial({ visible: false })
+  );
+  hitbox.position.y = 1.2;
+  group.add(hitbox);
+
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.9, 1.15, 24),
+    new THREE.MeshBasicMaterial({ color: 0x888888, side: THREE.DoubleSide })
+  );
+  ring.rotation.x = -Math.PI/2;
+  ring.position.y = 0.05;
+  group.add(ring);
+
+  const actionLabel = makeLabelSprite(6, 64);
+  actionLabel.spr.position.y = 3.1;
+  actionLabel.spr.visible = false;
+  group.add(actionLabel.spr);
+
+  // 직업 고정 배정 — 워커가 생기는 순서대로 광부/나무꾼/목수를 돌아가며 준다(6명이면 2·2·2).
+  // 임시 자식 워커는 몇 초 만에 사라지므로 순번을 소비하지 않는다(균형이 어긋나면 안 된다).
+  // ★사령관 지시(2026-08-11) "나무꾼 네이밍 빼, 네이밍은 지금 켜져 있는 터미널 이름으로" —
+  //   직업은 내부 배정으로만 쓰고, 머리 위 이름표는 그 워커가 대변하는 **세션(터미널) 제목**을 띄운다.
+  const role = isTransient ? null : ROLE_CYCLE[roleSeq++ % ROLE_CYCLE.length];
+  // ★사령관 지적(2026-08-11) "우리 캐릭터 여러 개 있는데 지금 몇몇 캐릭터가 없는데?" —
+  //   캐릭터를 `hash(jobId) % 5`로 뽑았더니 실측에서 Barbarian 3 · Mage 2 · Ranger 1이 나오고
+  //   **Knight와 Rogue는 한 번도 안 나왔다**. 생기는 순서대로 순환 배정해 5종이 다 나오게 한다.
+  const charFile = isTransient
+    ? CHAR_FILES[Math.floor(Math.random()*CHAR_FILES.length)]
+    : CHAR_FILES[charSeq++ % CHAR_FILES.length];
+
+  const idLabel = makeLabelSprite(5, 44); // 폭은 원래대로 — 긴 제목은 drawTextFit이 글자를 줄여 담는다
+  idLabel.spr.position.y = 3.8;
+  drawTextFit(idLabel, jobId, '#cfd9c2', 20); // 세션 제목이 들어오면 poll에서 갈아끼운다
+  group.add(idLabel.spr);
+
+  const barLabel = makeLabelSprite(3.6, 18);
+  barLabel.spr.position.y = 3.5;
+  group.add(barLabel.spr);
+
+  // NPC 대사 말풍선 — 이름표보다 위에 뜬다
+  const chatLabel = makeLabelSprite(6.2, 46);
+  chatLabel.spr.position.y = 4.6;
+  chatLabel.spr.visible = false;
+  group.add(chatLabel.spr);
+
+  const w = {
+    jobId, role, charFile, group, placeholder, ring, hitbox, actionLabel, idLabel, barLabel, chatLabel,
+    bob: Math.random()*10, mixer: null, model: null, actions: new Map(), idleAction: null,
+    curAction: null, holdUntil: 0, transient: !!isTransient,
+    // ══ 상태 머신(§3) 단일 필드 — IDLE / TRAVEL / WORK / HAUL / DELIVER
+    state: 'IDLE', target: null, waypoint: null, workClip: null, workHold: 2600
+  };
+  workers.set(isTransient ? (jobId + ':' + Math.random()) : jobId, w);
+  return w;
+}
+
+async function loadCharacterFor(w){
+  const file = w.charFile || CHAR_FILES[hashPos(w.jobId).h % CHAR_FILES.length];
+  await clipsReady;
+  let g;
+  try { g = await load('./assets/characters/' + file); }
+  catch (e) { console.warn('[agentview] char load fail', file, e); return; }
+  const m = g.scene;
+  m.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
+  const box = new THREE.Box3().setFromObject(m);
+  const sz = new THREE.Vector3(); box.getSize(sz);
+  const natH = sz.y || 1;
+  m.scale.setScalar(1.5/natH);
+  const b2 = new THREE.Box3().setFromObject(m);
+  m.position.y -= b2.min.y;
+
+  w.group.remove(w.placeholder);
+  w.model = m;
+  w.group.add(m);
+  // 오른손 슬롯 본 — player.js와 동일하게 KayKit 리그의 `handslotr`를 찾아 도구를 붙일 자리로 쓴다.
+  m.traverse(o => { if (o.isBone && o.name === 'handslotr') w.handSlot = o; });
+  if (!w.handSlot) console.warn('[agentview] handslotr 본을 못 찾음 —', file);
+  // 모델이 늦게 도착한 사이에 이미 작업이 배정됐다면 지금 연장을 들려준다.
+  if (w._wantTool) equipTool(w, w._wantTool);
+
+  w.mixer = new THREE.AnimationMixer(m);
+  mixers.push(w.mixer);
+  const idleClip = sharedClips.get(IDLE_CLIP);
+  if (idleClip) {
+    w.idleAction = w.mixer.clipAction(idleClip);
+    w.idleAction.play();
+    w.curAction = w.idleAction;
+  }
+}
+
+// ══ 워커 전용 가상 시계 ══
+// 자동화 탭은 백그라운드라 rAF가 멈춰 워커가 한 발도 못 움직인다(이번 트랙의 반복 교훈 5).
+// 워커 타이머를 전부 이 시계로 통일해두면, 렌더 없이 `__simSteps()`로 상태 머신만 강제로 흘려보내
+// "한 사이클 완주"를 검증할 수 있다. 평상시 SIM_OFFSET=0이라 performance.now()와 완전히 동일하다.
+let SIM_OFFSET = 0;
+const nowMs = () => performance.now() + SIM_OFFSET;
+
+function playCategory(w, clipName, holdMs){
+  if (!w.mixer) return; // 캐릭터 아직 로드중이면 애니는 스킵(라벨 팝업은 그대로 뜸)
+  const clip = sharedClips.get(clipName) || sharedClips.get(DEFAULT_ANIM);
+  if (!clip) return;
+  let action = w.actions.get(clip.name);
+  if (!action) { action = w.mixer.clipAction(clip); w.actions.set(clip.name, action); }
+  action.setLoop(THREE.LoopRepeat, Infinity);
+  if (w.curAction && w.curAction !== action) w.curAction.fadeOut(0.15);
+  action.reset().fadeIn(0.15).play();
+  w.curAction = action;
+  w.holdUntil = nowMs() + (holdMs || 1700);
+}
+
+function ensureLoopAction(w, clipName){
+  if (!w.mixer) return;
+  const clip = sharedClips.get(clipName);
+  if (!clip) return;
+  let action = w.actions.get(clip.name);
+  if (!action) { action = w.mixer.clipAction(clip); action.setLoop(THREE.LoopRepeat, Infinity); w.actions.set(clip.name, action); }
+  if (w.curAction !== action) {
+    if (w.curAction) w.curAction.fadeOut(0.15);
+    action.reset().fadeIn(0.15).play();
+    w.curAction = action;
+  }
+}
+
+// 도구 이벤트 → 목적지(광물/나무/제작대/본부)로 이동 시작. 도착 후 실제 도구 애니메이션 재생.
+// ★사령관 지적(2026-08-08): "AI가 어떻게 광물을 캐오고 어떤 액션을 하는지 안 나와 있다" —
+//   워커가 도착해서 애니메이션만 재생하고 끝이라 "무슨 일을 해서 뭘 만들어내는지"가 안 보였다.
+//   도착 시 실제로 캔 광물 이름(예: 철광석)·채집/제작 종류를 "+1 자원명" 팝업으로 명시한다.
+const RESOURCE_LABEL = { ore: null /* node.name으로 실제 광종 표시 */, forage: '나무', build: '제작', base: '보고',
+  smith: '벼림', saw: '목재', trade: '교역' };
+const RESOURCE_COLOR = { ore: '#d8cfa8', forage: '#8fd06a', build: '#f0a860', base: '#7fb8ff',
+  smith: '#ff9d5c', saw: '#c8a86a', trade: '#7fb8ff' };
+function sendToWork(w, tool){
+  const category = categoryFor(w, tool);
+  const node = pickNode(category);
+  w.target = node;
+  w.waypoint = null;
+  w._lastDist = null; w._stuckSince = 0; w._flips = 0; w._giveUp = false; // 새 목표 — 진전 감시 초기화
+  w.workClip = animForCategory(category, tool);
+  w.pendingCategory = category;
+  w.workHold = 2600; // 캐는 동작을 충분히 보여준다(예전 1.7초는 도착하자마자 끝나버렸다)
+  w.resourceLabel = (category === 'ore' && node.name) ? node.name : (RESOURCE_LABEL[category] || '작업');
+  w.resourceColor = RESOURCE_COLOR[category] || '#eaffea';
+  // ★사령관 지시(2026-08-10): "에이전트들이 움직이면서 나무 캐고, 돌 캐고, 해오는 모션이 있어야 함" —
+  //   채집/채굴은 그 자리에서 끝나는 게 아니라, 캔 것을 들고 건설 현장까지 **가져와서 납품**하는 왕복이 된다.
+  w.carryAfter = (category === 'ore' || category === 'forage');
+  // ★사령관 지적(2026-08-11) "모루 앞에서 대장간 작업하는 사람 동작 있어야 하지 않나" —
+  //   건물 작업장(대장간·제재소·시장·건설현장)은 `carryAfter=false`라 도착 즉시 사이클이 끝나
+  //   `TRAVEL>IDLE`만 반복했다(실측). 채집처럼 **WORK 상태를 거쳐 그 자리에서 계속 두드리게** 한다.
+  w.craftAfter = (category === 'smith' || category === 'saw' || category === 'trade' || category === 'build');
+  if (w.craftAfter) w.workHold = 7000; // 망치질·톱질이 눈에 남을 만큼 유지
+  w.state = 'TRAVEL';
+  equipTool(w, category); // 연장을 들고 출발한다 — 곡괭이 들고 광산으로, 도끼 들고 숲으로
+}
+
+// ★사령관 지적(2026-08-10) "광물 캐는 거 없는데? 벌목도 안 하고" — 진짜 원인은 애니메이션이 아니라 **선점**이었다.
+//   활성 세션은 1초에 도구를 여러 번 호출하는데 이벤트마다 sendToWork가 목적지를 즉시 갈아치웠다.
+//   워커는 초속 4.5로 걷고 광물까지 20유닛이면 4초 이상 걸리니, 도착 전에 목표가 바뀌어 **영영 도착하지 못하고
+//   걷기만 반복**했다(= 캐는 동작·벌목 동작이 한 번도 재생되지 않음). 한 사이클(가서→캐고→지고 와서→납품)은
+//   끝까지 마치게 하고, 그 사이 들어온 도구는 큐에 쌓아 다음 사이클로 넘긴다.
+function enqueueWork(w, tool){
+  w._lastTool = tool; // 에이전트가 계속 일하는 동안 워커가 이어서 돌릴 기준 도구
+  if ((!w.state || w.state === 'IDLE') && !w._nextTool){ sendToWork(w, tool); return; }
+  w.queue = w.queue || [];
+  w.queue.push(tool);
+  while (w.queue.length > 2) w.queue.shift(); // 밀린 작업은 최신 2개만 — 오래된 건 버린다
+}
+// 한 사이클이 끝난 시점에 호출 — 큐에 다음 일이 있으면 잠깐 숨 고른 뒤 이어서 시작한다.
+function finishCycle(w){
+  w.state = 'IDLE';
+  w.target = null;
+  w.waypoint = null;
+  equipTool(w, null); // 일이 끝나면 연장을 내린다
+  w._restUntil = nowMs() + 900; // 한 번 숨 고르고 다음 사이클
+
+  if (w.queue && w.queue.length){
+    w._nextTool = w.queue.shift();
+    w._nextAt = nowMs() + 500;
+  }
+}
+
+// ══ 지고 가는 자원 — ★사령관 지적(2026-08-10) "케이킷 에셋 중에 통나무묶음, 돌묶음 이런 거 있을 텐데":
+//   처음엔 색만 입힌 정20면체를 들려놨는데 실제로 KayKit_ResourceBits 팩에 통나무 묶음·돌덩이·광종별 너겟이
+//   전부 있었다. 실제 게임 `modules/invui.js`의 매핑 규칙을 그대로 따른다 — iron/copper/gold/silver는
+//   전용 너겟 모델, 전용 모델이 없는 주석·석탄·코발트는 돌덩이에 틴트(게임도 정확히 그렇게 처리한다).
+const RES_BITS = REAL + 'resources/';
+const CARRY_MODEL = {
+  '나무':   { file:'Wood_Log_Stack' },        // 사령관이 지목한 통나무 묶음
+  '제작':   { file:'Wood_Planks_Stack_Small' },
+  '돌':     { file:'Stone_Chunks_Large' },
+  '철광석': { file:'Iron_Nuggets' },
+  '구리':   { file:'Copper_Nuggets' },
+  '은':     { file:'Silver_Nuggets' },
+  '금':     { file:'Gold_Nuggets' },
+  '주석':   { file:'Stone_Chunks_Small', tint:0xa8afb7 }, // invui.js와 동일한 대체 방식
+  '석탄':   { file:'Stone_Chunks_Small', tint:0x26282d },
+  '코발트': { file:'Stone_Chunks_Small', tint:0x3a63e0 },
+  '보석':   { file:'Stone_Chunks_Small', tint:0xd83a5e },
+};
+const CARRY_FALLBACK = { file:'Stone_Chunks_Small' };
+// 손 슬롯 본 밑에서의 배율 — 도구(곡괭이 scale 5)와 같은 좌표계라 그 기준에 맞춘 값.
+// (4.2로 시작했다가 통나무가 캐릭터보다 커져서 실렌더 대조 후 축소 — 손 본은 캐릭터 스케일이 이미 곱해져 있다)
+const CARRY_HAND_SCALE = 0.72;
+const carryProtoCache = new Map(); // file -> Promise<Object3D>
+function loadCarryProto(file){
+  if (!carryProtoCache.has(file)){
+    const gl = new GLTFLoader();
+    carryProtoCache.set(file, gl.loadAsync(RES_BITS + file + '.gltf').then(g => {
+      const root = g.scene;
+      root.traverse(o => { if (o.isMesh){ o.castShadow = true; if (o.material && o.material.map) o.material.map.colorSpace = THREE.SRGBColorSpace; } });
+      // 캐릭터가 두 손으로 들 만한 크기로 정규화(원본은 팩마다 스케일이 제각각이다)
+      const bb = new THREE.Box3().setFromObject(root);
+      const sz = new THREE.Vector3(); bb.getSize(sz);
+      const s = 0.95 / Math.max(0.001, Math.max(sz.x, sz.y, sz.z));
+      root.scale.setScalar(s);
+      return root;
+    }).catch(e => { console.warn('[agentview] 자원 모델 로드 실패', file, e); return null; }));
+  }
+  return carryProtoCache.get(file);
+}
+// ══ 손에 드는 도구 — ★사령관 "돌 곡괭이로 안 캐는데?": 빈손으로 곡괭이질 모션만 하니 캐는 걸로 안 읽혔다.
+//   실제 게임 player.js와 동일한 방식 — KayKit 리그의 `handslotr` 본을 찾아 그 밑에 모델을 붙인다.
+//   kenney 모델은 GLB에 텍스처가 없어 공유 colormap을 입혀야 한다(player.js _attach의 kenney 분기와 동일).
+let _toolColormap = null;
+function toolColormap(){
+  if (!_toolColormap){
+    _toolColormap = new THREE.TextureLoader().load(TOOL_BASE + 'Textures/colormap.png');
+    _toolColormap.flipY = false; _toolColormap.colorSpace = THREE.SRGBColorSpace;
+  }
+  return _toolColormap;
+}
+const toolProtoCache = new Map();
+function loadToolProto(spec){
+  if (!toolProtoCache.has(spec.file)){
+    const gl = new GLTFLoader();
+    toolProtoCache.set(spec.file, gl.loadAsync(TOOL_BASE + spec.file).then(g => {
+      const t = g.scene;
+      t.traverse(o => {
+        if (!o.isMesh) return;
+        o.frustumCulled = false; o.castShadow = true;
+        if (spec.kenney){ o.material = o.material.clone(); o.material.map = toolColormap(); o.material.color.set(0xffffff); o.material.needsUpdate = true; }
+        else if (o.material && o.material.map) o.material.map.colorSpace = THREE.SRGBColorSpace;
+      });
+      return t;
+    }).catch(e => { console.warn('[agentview] 도구 모델 로드 실패', spec.file, e); return null; }));
+  }
+  return toolProtoCache.get(spec.file);
+}
+function equipTool(w, category){
+  // ★버그(2026-08-10): 캐릭터 GLB 로드가 끝나기 전에 첫 작업이 배정되면 `handSlot`(손 본)이 아직 없어
+  //   장착이 조용히 실패했다 — 실제 파이프라인에서는 워커가 계속 빈손이었다(강제 호출로 확인했을 땐 보였던 이유).
+  //   원하는 카테고리를 기억해뒀다가 모델 로드가 끝나면 그때 장착한다.
+  w._wantTool = category || null;
+  const spec = CATEGORY_TOOL[category];
+  if (!spec){ if (w.toolMesh) w.toolMesh.visible = false; w._toolFile = null; return; }
+  if (w._toolFile === spec.file && w.toolMesh){ w.toolMesh.visible = true; return; }
+  loadToolProto(spec).then(proto => {
+    if (!proto || !w.handSlot || w._wantTool !== category) return;
+    if (w.toolMesh) w.handSlot.remove(w.toolMesh);
+    const wrap = new THREE.Group();
+    wrap.add(proto.clone(true));
+    wrap.scale.setScalar(spec.scale || 1);
+    wrap.rotation.set(...(spec.rot || [0,0,0]));
+    w.handSlot.add(wrap);
+    w.toolMesh = wrap; w._toolFile = spec.file;
+  });
+}
+window.__equipTool = (w, c) => equipTool(w, c); // 디버그 훅
+window.__setCarrying = (w, on) => setCarrying(w, on); // 디버그 훅(운반물 모델을 바로 들려보고 확인용)
+function setCarrying(w, on){
+  w.carrying = !!on;
+  if (!on){ if (w.carryMesh) w.carryMesh.visible = false; return; }
+  const spec = CARRY_MODEL[w.resourceLabel] || CARRY_FALLBACK;
+  if (w._carryFile === spec.file && w.carryMesh){ w.carryMesh.visible = true; return; }
+  loadCarryProto(spec.file).then(proto => {
+    if (!proto || !w.carrying) return;
+    if (w.carryMesh && w.carryMesh.parent) w.carryMesh.parent.remove(w.carryMesh);
+    const m = proto.clone(true);
+    if (spec.tint) m.traverse(o => { if (o.isMesh){ o.material = o.material.clone(); o.material.color.setHex(spec.tint); } });
+    // ★사령관 지적(2026-08-10) "가지고 올 때 손으로 가져와야지 머리로 가져옴": 그룹에 직접 붙여 머리 위에
+    //   띄워놨었다. 연장과 똑같이 **손 슬롯 본(handslotr)** 에 붙여 손으로 들게 한다(운반 중엔 연장을 내리므로
+    //   같은 슬롯을 써도 겹치지 않는다). 본 밑이라 크기는 도구와 같은 배율 기준으로 맞춘다.
+    if (w.handSlot){
+      m.scale.multiplyScalar(CARRY_HAND_SCALE);
+      m.position.set(0, 0, 0);
+      w.handSlot.add(m);
+    } else {
+      m.position.set(0, 1.85, 0.42); // 손 본을 못 찾은 예외 상황 폴백
+      w.group.add(m);
+    }
+    w.carryMesh = m; w._carryFile = spec.file;
+  });
+}
+
+function ensureWorker(jobId){
+  let w = workers.get(jobId);
+  if (w) return w;
+  w = baseWorker(jobId, false);
+  loadCharacterFor(w);
+  return w;
+}
+
+function spawnTransientChild(parentJobId, clipName){
+  const w = baseWorker(parentJobId, true);
+  loadCharacterFor(w).then(() => playCategory(w, clipName, 2200));
+  drawText(w.actionLabel, '↳ Agent 소환', '#eaffea', 22);
+  w.actionLabel.spr.visible = true;
+  setTimeout(() => {
+    scene.remove(w.group);
+    for (const [k, v] of workers) if (v === w) workers.delete(k);
+  }, 3200);
+}
+
+// ══ NPC 대사 — ★사령관 지시(2026-08-11) ══
+// "중간중간마다 게임 대화창처럼 에이전트들이 말하는 거 넣으면 좋겠는데 '아이고~ 힘들어라' 이러면서
+//  재밌는 요소로? npc들이 가끔 대화창으로 날리는 것처럼"
+// 상황(역할/상태)에 맞는 대사를 머리 위에 잠깐 띄운다. 너무 잦으면 시끄러우니 워커당 간격을 벌린다.
+const CHAT = {
+  ore:    ['여기 광맥이 실하네', '곡괭이가 무뎌졌어…', '한 번만 더 치면 되겠다', '어깨야…'],
+  forage: ['이 나무 굵네', '넘어간다—!', '톱밥이 눈에 들어갔어', '도끼날 좀 갈아야겠다'],
+  smith:  ['쇠는 달궈졌을 때 쳐야지', '아이고 팔이야', '불 좀 더 지펴줘', '이 정도면 잘 벼렸다'],
+  saw:    ['결을 잘 봐야 해', '한 뼘만 더', '톱질이 제일 고돼', '판자 다 켰다'],
+  trade:  ['오늘 시세가 어떻더라', '이건 밑지고 파는 거야', '손님이 없네…', '장부 좀 봐야겠다'],
+  build:  ['못이 모자란데', '이러다 해 지겠다', '기둥은 똑바로 세워야지', '지붕만 올리면 끝!'],
+  haul:   ['아이고~ 힘들어라', '무겁다 무거워', '허리 나가겠네', '조금만 더 가면 돼'],
+  deliver:['자, 여기 놓습니다', '오늘 몫은 채웠다', '다음 것도 금방 가져올게'],
+  idle:   ['일감 좀 주쇼', '심심하다…', '한숨 돌리자', '오늘 날씨 좋네'],
+  blocked:['언제까지 기다려야 하나', '대답 좀 해주시오', '기다리는 게 제일 힘들어'],
+  done:   ['오늘 일 끝!', '수고했다 다들', '이제 좀 쉬자'],
+  failed: ['망했다…', '이게 왜 안 되지', '처음부터 다시 해야 하나'],
+};
+function sayChat(w, kind){
+  const lines = CHAT[kind];
+  if (!lines || !w.chatLabel) return;
+  const now = nowMs();
+  if (now < (w._chatUntil || 0)) return;          // 아직 말하는 중
+  if (now < (w._nextChatAt || 0)) return;         // 쉬는 시간
+  drawTextFit(w.chatLabel, lines[Math.floor(Math.random()*lines.length)], '#fff6e0', 21);
+  w.chatLabel.spr.visible = true;
+  w._chatUntil = now + 2800;
+  w._nextChatAt = now + 16000 + Math.random()*26000; // 워커마다 16~42초 간격
+}
+function tickChat(w, now){
+  if (w.chatLabel && w.chatLabel.spr.visible && now > (w._chatUntil||0)) w.chatLabel.spr.visible = false;
+  // 일이 없을 때도 가끔 한마디 — 멈춰 있는 워커가 죽은 것처럼 보이지 않게
+  if (w.state === 'IDLE' && now > (w._nextChatAt||0)){
+    sayChat(w, w.jobState === 'blocked' ? 'blocked'
+             : (w.jobState === 'done' || w.jobState === 'completed') ? 'done'
+             : w.jobState === 'failed' ? 'failed' : 'idle');
+  }
+}
+
+function pulseLabel(w, text){
+  drawText(w.actionLabel, text, '#eaffea', 22);
+  w.actionLabel.spr.visible = true;
+  w._labelUntil = nowMs() + 1800;
+}
+
+// 도착 후 실제로 "뭘 만들어냈는지" 위로 떠오르며 사라지는 팝업 — 툴 이름 라벨과 별개로 결과물을 명시.
+const yieldPopups = [];
+function spawnYieldPopup(x, y, z, text, color){
+  const label = makeLabelSprite(4.6, 42);
+  drawText(label, '+1 ' + text, color || '#eaffea', 24);
+  label.spr.position.set(x, y, z);
+  scene.add(label.spr);
+  yieldPopups.push({ spr: label.spr, t: 0, life: 1.5 });
+}
+function updateYieldPopups(dt){
+  for (let i = yieldPopups.length - 1; i >= 0; i--) {
+    const p = yieldPopups[i];
+    p.t += dt;
+    p.spr.position.y += dt * 1.5;
+    p.spr.material.opacity = Math.max(0, 1 - p.t / p.life);
+    if (p.t >= p.life) { scene.remove(p.spr); p.spr.material.dispose(); yieldPopups.splice(i, 1); }
+  }
+}
+
+function fmtElapsed(iso){
+  if (!iso) return '';
+  const s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime())/1000));
+  const m = Math.floor(s/60), r = s%60;
+  return m > 0 ? `${m}분 ${r}초` : `${r}초`;
+}
+
+// 모델 ID → 사람이 읽는 이름. `claude-opus-5[1m]`, `claude-sonnet-4-5-20250929`, `gpt-5-codex` 같은
+// 실제 값을 짧게 줄인다(머리 위 이름표에 들어가야 해서 길면 안 된다).
+function modelLabel(id){
+  if (!id) return '에이전트';
+  const s = String(id).toLowerCase();
+  if (s.includes('opus'))   return 'Opus';
+  if (s.includes('sonnet')) return 'Sonnet';
+  if (s.includes('haiku'))  return 'Haiku';
+  if (s.includes('fable'))  return 'Fable';
+  if (s.includes('gpt') || s.includes('codex')) return 'GPT';
+  if (s.includes('gemini')) return 'Gemini';
+  return String(id).split(/[-_]/)[0] || '에이전트';
+}
+// ★사령관 질문(2026-08-11) "m은 만 단위인거지? 946만이야 이번주?" — 아니다. M은 **백만**이라
+//   946.35M은 946만이 아니라 9억 4,635만이다. k/M/B 표기가 한국어 단위(만/억)와 어긋나서 생긴 오해라
+//   표기 자체를 **억/만**으로 바꾼다. 1만=10,000 · 1억=100,000,000.
+function fmtTok(n){
+  n = Number(n) || 0;
+  if (n >= 1e8) return (n/1e8).toFixed(2) + '억';
+  if (n >= 1e6) return (n/1e4).toFixed(0) + '만';
+  if (n >= 1e4) return (n/1e4).toFixed(1) + '만';
+  return String(n);
+}
+// ══ 비용 환산 ══
+// Anthropic API 공개 목록가($/100만 토큰, 2026-08 기준). 캐시 생성=입력×1.25, 캐시 읽기=입력×0.1.
+// ⚠️ 사령관은 구독으로 쓰므로 실제 청구액이 아니라 "API로 썼다면 얼마" 환산치다.
+const MODEL_RATE = {
+  Fable:  { in: 10, out: 50 },
+  Opus:   { in: 5,  out: 25 },
+  Sonnet: { in: 3,  out: 15 },   // 2026-08-31까지 도입가($2/$10) 적용 시 더 낮음
+  Haiku:  { in: 1,  out: 5  },
+};
+function costOf(byModel){
+  let usd = 0, unknownTok = 0;
+  for (const id in byModel){
+    const k = modelLabel(id) === '에이전트' ? '기타' : modelLabel(id);
+    const r = MODEL_RATE[k];
+    const s = byModel[id];
+    if (!r){ unknownTok += (s.in||0)+(s.out||0)+(s.cw||0)+(s.cr||0); continue; }
+    usd += ((s.in||0)*r.in + (s.out||0)*r.out + (s.cw||0)*r.in*1.25 + (s.cr||0)*r.in*0.1) / 1e6;
+  }
+  return { usd, unknownTok };
+}
+function fmtUsd(v){
+  if (v >= 1000) return '$' + v.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  if (v >= 1) return '$' + v.toFixed(2);
+  return '$' + v.toFixed(3);
+}
+
+// ══ 하단 최근 활동 — raw 로그 나열 대신 3줄만, 누가 무엇을 했는지로 ══
+const FEED_MAX = 3;
+const feedRows = [];
+function pushFeed(jobId, tool, detail){
+  const j = latestJobs.find(x => x.jobId === jobId);
+  const who = j ? modelLabel(j.model) : '에이전트';
+  const w = workers.get(jobId);
+  const role = w && w.role ? ROLE_NAME[w.role] : null;
+  feedRows.unshift({ who: who + (role ? ' · ' + role : ''), what: tool + (detail ? ' — ' + detail.slice(0, 52) : '') });
+  while (feedRows.length > FEED_MAX) feedRows.pop();
+  document.getElementById('feed').innerHTML = feedRows.map(r =>
+    `<div class="row"><i class="dot"></i><span class="who">${escapeHtml(r.who)}</span><span class="what">${escapeHtml(r.what)}</span></div>`
+  ).join('');
+}
+
+// ══ 워커 말풍선 — 화면을 카드로 덮지 않고, 클릭한 워커의 정보만 띄운다 ══
+let popJobId = null;
+function showPop(jobId, sx, sy){
+  const j = latestJobs.find(x => x.jobId === jobId);
+  const w = workers.get(jobId);
+  if (!j || !w) return;
+  popJobId = jobId;
+  const st = j.state || 'idle';
+  const el = document.getElementById('pop');
+  el.innerHTML = `
+    <div class="ptop"><span class="pmodel">${modelLabel(j.model)}</span>
+      <span class="st st-${st} pbadge">${st}</span></div>
+    <div class="ptitle">${escapeHtml(j.name || j.jobId)}</div>
+    <div class="prow"><span>역할</span><b>${w.role ? ROLE_NAME[w.role] : '–'}</b></div>
+    <div class="prow"><span>생성 토큰</span><b class="num">${fmtTok(j.tokens || 0)}</b></div>
+    <div class="prow"><span>마지막 도구</span><b>${escapeHtml((j.detail || '').replace(/^마지막 도구: /, '') || '–')}</b></div>
+    <div class="prow"><span>경과</span><b class="num">${fmtElapsed(j.createdAt)}</b></div>
+    <button class="phist" data-jobid="${jobId}">히스토리 보기</button>`;
+  el.classList.add('open');
+  const r = el.getBoundingClientRect();
+  el.style.left = Math.min(Math.max(10, sx - r.width/2), innerWidth - r.width - 10) + 'px';
+  el.style.top  = Math.max(58, sy - r.height - 16) + 'px';
+}
+function hidePop(){ popJobId = null; document.getElementById('pop').classList.remove('open'); }
+
+let lastEventId = 0;
+let latestJobs = [];
+
+async function poll(){
+  try {
+    const [jr, er] = await Promise.all([
+      fetch('/api/jobs').then(r=>r.json()),
+      fetch('/api/events?after=' + lastEventId).then(r=>r.json())
+    ]);
+    latestJobs = jr.jobs;
+    updateBuildSite(jr.jobs);
+
+    // 상단 요약 — 카드 나열 대신 "몇 개가 돌고 있는지"만
+    document.getElementById('stActive').textContent = jr.jobs.filter(j => j.state === 'active').length;
+    if (popJobId) { const p = document.getElementById('pop'); showPop(popJobId, parseFloat(p.style.left)+p.offsetWidth/2, parseFloat(p.style.top)+p.offsetHeight+16); }
+
+    for (const j of jr.jobs){
+      const w = ensureWorker(j.jobId);
+      const color = STATE_COLOR[j.state] ?? 0x777777;
+      w.ring.material.color.setHex(color);
+      if (w.placeholder) w.placeholder.material.color.setHex(color);
+      const ratio = Math.min(1, (j.tokens||0) / 50000);
+      drawBar(w.barLabel, ratio, '#7fbf6a');
+      // 에이전트가 실제로 돌고 있는지 — 워커는 이 상태일 때만 쉬지 않고 일한다.
+      w.jobState = j.state;
+      // ★사령관 지시(2026-08-11) "에이전트 이름은 각각의 모델명, 소넷이나 오퍼스, gpt면 gpt 에이전트,
+      //   그리고 토큰양이 보여야 할 듯" — 머리 위 이름표를 세션 제목에서 **모델명 + 누적 토큰**으로 교체.
+      const shown = modelLabel(j.model) + ' · ' + fmtTok(j.tokens || 0);
+      if (w._labelName !== shown){ w._labelName = shown; drawTextFit(w.idLabel, shown, '#cfd9c2', 20); }
+    }
+
+    for (const ev of er.events){
+      const w = ensureWorker(ev.jobId);
+      enqueueWork(w, ev.tool); // 진행 중인 사이클을 끊지 않고 큐로 넘긴다(끊으면 영영 도착을 못 한다)
+      pulseLabel(w, ev.tool + (ev.detail ? (': ' + ev.detail.slice(0,26)) : ''));
+      if (ev.tool === 'Agent' || ev.tool === 'Task') spawnTransientChild(ev.jobId, 'Interact');
+      pushFeed(ev.jobId, ev.tool, ev.detail);
+    }
+    if (er.latestId) lastEventId = er.latestId;
+  } catch(e){ /* 서버 재시작 등 일시 실패는 다음 폴링에서 회복 */ }
+}
+
+// ── job 히스토리 드로어 렌더링 헬퍼 ──
+function escapeHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+// 경량 마크다운: 코드펜스 → <pre>, 인라인 `code` → <code>, **굵게** → <b>. 표/헤더 등은 일부러 안 건드림(줄바꿈 그대로 pre-wrap로 충분히 읽힘).
+function mdLite(raw){
+  const parts = (raw||'').split(/```/);
+  return parts.map((chunk, i) => {
+    if (i % 2 === 1) return `<pre>${escapeHtml(chunk.replace(/^\w*\n/, ''))}</pre>`;
+    return escapeHtml(chunk).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  }).join('');
+}
+function relTime(iso){
+  if (!iso) return '';
+  const ms = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(ms/60000);
+  if (m < 1) return '방금';
+  if (m < 60) return m + '분 전';
+  const h = Math.floor(m/60); if (h < 24) return h + '시간 전';
+  return Math.floor(h/24) + '일 전';
+}
+const ST_LABEL = { active:'진행중', blocked:'대기', failed:'실패', done:'완료', completed:'완료', queued:'대기열' };
+
+// ══ 워커 클릭 → 말풍선 ══ (사령관 컨펌: "워커 클릭 → 말풍선으로")
+// 화면 전체가 게임이므로 캔버스 클릭을 레이캐스트해서 어떤 워커를 눌렀는지 찾는다.
+// ★두 가지를 같이 해결한다:
+//   ① 드래그(카메라 회전)와 클릭 구분 — pointerdown에서 바로 열면 회전할 때마다 팝업이 뜬다.
+//   ② OrbitControls가 같은 캔버스의 pointerdown을 먼저 잡고 setPointerCapture 예외를 던지면
+//      뒤에 등록된 리스너가 실행되지 않는다(실측: 합성 이벤트에서 팝업이 한 번도 안 열렸다).
+//      **capture 단계**에 등록해 OrbitControls보다 먼저 받는다.
+const _ray = new THREE.Raycaster(), _pt = new THREE.Vector2();
+let _downX = 0, _downY = 0;
+renderer.domElement.addEventListener('pointerdown', (e) => { _downX = e.clientX; _downY = e.clientY; }, { capture: true });
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (Math.hypot(e.clientX - _downX, e.clientY - _downY) > 6) return; // 드래그 = 카메라 회전이므로 무시
+  _pt.x = (e.clientX / innerWidth) * 2 - 1;
+  _pt.y = -(e.clientY / innerHeight) * 2 + 1;
+  _ray.setFromCamera(_pt, camera);
+  let best = null, bestDist = Infinity;
+  for (const [, w] of workers){
+    if (!w.hitbox || w.transient) continue;
+    const hits = _ray.intersectObject(w.hitbox, false);
+    if (hits.length && hits[0].distance < bestDist){ bestDist = hits[0].distance; best = w; }
+  }
+  if (best) showPop(best.jobId, e.clientX, e.clientY);
+  else hidePop();
+}, { capture: true });
+window.__clickReady = true;              // 리스너 등록 확인용
+window.__pickAt = (x, y) => {            // 합성 이벤트 없이 픽 로직만 직접 검증
+  _pt.x = (x / innerWidth) * 2 - 1; _pt.y = -(y / innerHeight) * 2 + 1;
+  _ray.setFromCamera(_pt, camera);
+  let best = null, bd = Infinity;
+  for (const [, w] of workers){
+    if (!w.hitbox || w.transient) continue;
+    const h = _ray.intersectObject(w.hitbox, false);
+    if (h.length && h[0].distance < bd){ bd = h[0].distance; best = w; }
+  }
+  if (best) showPop(best.jobId, x, y); else hidePop();
+  return best ? best.jobId : null;
+};
+document.getElementById('pop').addEventListener('click', async (e) => {
+  const btn = e.target.closest('.phist');
+  if (!btn) return;
+  await openHistory(btn.dataset.jobid);
+});
+
+// job 히스토리 드로어. 각 행은 user 턴(text 없음, detail=사령관 원문)과
+// assistant 턴(text=전체 응답, detail=요약)으로 구분해 말풍선처럼 좌우 배치한다.
+async function openHistory(jobId){
+  const j = latestJobs.find(x => x.jobId === jobId);
+  const r = await fetch('/api/timeline?jobId=' + encodeURIComponent(jobId)).then(r=>r.json());
+  document.getElementById('tlTitle').textContent = j && (j.name||jobId) || jobId;
+  document.getElementById('tlCount').textContent = jobId + ' · ' + r.timeline.length + '개 기록';
+  const rows = r.timeline.slice().reverse();
+  document.getElementById('tlBody').innerHTML = rows.map((row, idx) => {
+    const isUser = !row.text;
+    const who = isUser ? '사령관' : 'Claude';
+    const stPill = !isUser && row.state ? `<span class="pill st-${row.state}">${ST_LABEL[row.state]||row.state}</span>` : '';
+    const detail = escapeHtml(row.detail || (isUser ? '' : '(요약 없음)'));
+    const hasFull = row.text && row.text.trim() && row.text.trim() !== (row.detail||'').trim();
+    const toggle = hasFull ? `<button class="more" data-idx="${idx}">전체 응답 보기 ▾</button><div class="full" id="tlFull${idx}">${mdLite(row.text)}</div>` : '';
+    return `<div class="turn ${isUser?'user':'assistant'}"><div class="bubble">
+      <div class="bmeta"><span class="who">${who}</span>${stPill}<span title="${row.at||''}">${relTime(row.at)}</span></div>
+      <div class="detail">${detail}</div>
+      ${toggle}
+    </div></div>`;
+  }).join('') || '<div class="empty">기록 없음</div>';
+  document.getElementById('timeline').classList.add('open');
+}
+document.getElementById('tlBody').addEventListener('click', (e) => {
+  const btn = e.target.closest('.more');
+  if (!btn) return;
+  const full = document.getElementById('tlFull' + btn.dataset.idx);
+  const show = full.classList.toggle('show');
+  btn.textContent = show ? '접기 ▴' : '전체 응답 보기 ▾';
+});
+document.getElementById('tlClose').onclick = () => { document.getElementById('timeline').classList.remove('open'); };
+
+// ══ 토큰 사용량(일별·주별) ══
+// ★사령관 지시(2026-08-11) "내가 일별로 주별로 얼마나 에이전트 토큰을 썼는지 알 수 있으면 좋을 듯".
+// 서버가 `~/.claude/projects`의 트랜스크립트 전체를 증분 인덱싱해서 날짜별·모델별 합계를 내려준다.
+// 여기서는 모델별 색으로 쌓은 가로 막대로 보여준다(같은 날 오퍼스/소넷을 얼마씩 썼는지 한눈에).
+const MODEL_COLOR = { Opus:'#c48cf0', Sonnet:'#6fb7f5', Haiku:'#68d3a7', Fable:'#f0b45c', GPT:'#7de08a', Gemini:'#f07c9b', 기타:'#8d99a6' };
+// ★사령관 질문(2026-08-11) "이거 토큰 사용량이 진짜 맞는 수치?" — 값은 트랜스크립트와 정확히 일치했지만
+//   **지표가 틀렸다**. 실측 구성비: 캐시 읽기 98.35% · 캐시 생성 1.31% · 출력 0.33% · 입력 0.01%.
+//   즉 "오늘 276M"은 사실상 캐시 재사용량 총합이라 실제로 쓴 양과 무관했다.
+//   주 수치를 **신규 처리 토큰(입력 + 출력 + 캐시 생성)** 으로 바꾸고, 캐시 읽기는 따로 보여준다.
+// ★사령관 지시(2026-08-11) "실제 토큰양으로 해줘" — 주 수치를 **실제로 오간 전량**으로 되돌린다.
+//   (직전에 캐시 읽기 98%가 실사용을 가린다고 판단해 신규 처리분만 보여줬는데, 임의로 빼지 말라는 지시)
+//   대신 내역(입력/출력/캐시 생성/캐시 읽기)을 하단에 그대로 병기해 구성이 보이게 한다.
+// ★사령관 지적(2026-08-11) "억이 말도 안 되는데?" — 막대에 **캐시 읽기**를 넣었던 게 원인이다.
+//   캐시 읽기는 대화가 길어질수록 매 요청이 이전 대화 전체를 다시 읽는 누적치라(실측: 한 세션 하루
+//   818회 × 38.6만) 총량이 억 단위로 부풀어 실제 작업량과 무관해진다. 주별 최대 총량 129억 vs
+//   같은 주 생성 3,888만 — 후자가 사령관 체감과 맞는다.
+//   그래서 **막대·행 수치는 생성(출력) 토큰**으로 잡고, 총량·캐시는 아래에 참고로만 둔다.
+function sumRow(byModel){
+  let all = 0, cr = 0, cw = 0, out = 0, inp = 0; const per = {};
+  for (const id in byModel){
+    const s = byModel[id];
+    const k = modelLabel(id) === '에이전트' ? '기타' : modelLabel(id);
+    per[k] = (per[k]||0) + (s.out||0);           // 막대 구간도 생성 기준
+    out += (s.out||0); cr += (s.cr||0); cw += (s.cw||0); inp += (s.in||0);
+    all += (s.in||0) + (s.out||0) + (s.cw||0) + (s.cr||0);
+  }
+  return { total:out, per, all, cache:cr, cacheWrite:cw, out, in:inp };
+}
+function usageRows(rows, key, maxTotal, todayKey){
+  return rows.map(r => {
+    const { total, per } = sumRow(r.byModel);
+    const w = maxTotal ? (total/maxTotal*100) : 0;
+    const segs = Object.entries(per).sort((a,b)=>b[1]-a[1]).map(([m,v]) =>
+      `<i style="width:${(v/Math.max(1,total)*100).toFixed(1)}%;background:${MODEL_COLOR[m]||MODEL_COLOR.기타}" title="${m} ${fmtTok(v)}"></i>`).join('');
+    const label = key === 'week' ? (r.week.slice(5).replace('-','/') + ' 주') : r.date.slice(5).replace('-','/');
+    const isToday = key !== 'week' && r.date === todayKey;
+    return `<div class="row${isToday?' today':''}"><div class="lb">${label}</div>
+      <div class="track" style="width:${Math.max(2,w).toFixed(1)}%">${segs}</div>
+      <div class="vl">${fmtTok(total)}</div></div>`;
+  }).join('');
+}
+async function renderUsage(){
+  const box = document.getElementById('usage');
+  box.innerHTML = '<h4>토큰 사용량</h4><div class="sub">집계 중…</div>';
+  let u;
+  try { u = await fetch('/api/usage?days=14').then(r=>r.json()); }
+  catch(e){ box.innerHTML = '<h4>토큰 사용량</h4><div class="sub">서버 응답 없음</div>'; return; }
+
+  const now = new Date();
+  const todayKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const dayMax = Math.max(1, ...u.days.map(d => sumRow(d.byModel).total));
+  const weekMax = Math.max(1, ...u.weeks.map(d => sumRow(d.byModel).total));
+  const grand = u.days.reduce((a,d)=>a+sumRow(d.byModel).total, 0);
+  const grandCache = u.days.reduce((a,d)=>a+sumRow(d.byModel).cache, 0);
+  const today = u.days.find(d => d.date === todayKey);
+  const thisWeek = u.weeks[u.weeks.length-1];
+  const tSum = today ? sumRow(today.byModel) : null;
+  const wSum = thisWeek ? sumRow(thisWeek.byModel) : null;
+  const tCost = today ? costOf(today.byModel) : { usd: 0 };
+  const wCost = thisWeek ? costOf(thisWeek.byModel) : { usd: 0 };
+  const gCost = u.days.reduce((a, d) => a + costOf(d.byModel).usd, 0);
+
+  const models = new Set();
+  for (const d of u.days) for (const id in d.byModel) models.add(modelLabel(id) === '에이전트' ? '기타' : modelLabel(id));
+
+  box.innerHTML = `
+    <h4>토큰 사용량</h4>
+    <div class="sub">${u.scanning ? `집계 중 ${u.progress.done}/${u.progress.total}…` : `생성 토큰`}</div>
+    ${u.format && u.format.warning ? `<div class="sub" style="color:#e8a13c">기록 형식을 알아보지 못했다 — Claude Code 업데이트로 형식이 바뀌었을 수 있다</div>` : ''}
+    <div class="sect">최근 14일</div>${usageRows(u.days, 'date', dayMax, todayKey) || '<div class="sub">기록 없음</div>'}
+    <div class="sect">주별</div>${usageRows(u.weeks, 'week', weekMax) || '<div class="sub">기록 없음</div>'}
+    <div class="legend">${[...models].map(m=>`<span><i style="background:${MODEL_COLOR[m]||MODEL_COLOR.기타}"></i>${m}</span>`).join('')}</div>
+    <div class="tot"><span>오늘</span><b>${fmtTok(tSum?tSum.out:0)}</b></div>
+    <div class="tot"><span>이번 주</span><b>${fmtTok(wSum?wSum.out:0)}</b></div>
+    <div class="tot"><span>최근 14일</span><b>${fmtTok(grand)}</b></div>`;
+}
+document.getElementById('usageBtn').onclick = () => {
+  const box = document.getElementById('usage');
+  const open = box.classList.toggle('open');
+  if (open) renderUsage();
+};
+// 상단 바의 "오늘 생성" — 사용량 API를 30초마다 조용히 갱신한다(패널을 열지 않아도 보이게).
+async function refreshTodayStat(){
+  try {
+    const u = await fetch('/api/usage?days=2').then(r=>r.json());
+    const n = new Date();
+    const key = `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`;
+    const today = (u.days || []).find(d => d.date === key);
+    document.getElementById('stToday').textContent = fmtTok(today ? sumRow(today.byModel).out : 0);
+  } catch(e){ /* 서버 재시작 등은 다음 주기에 회복 */ }
+}
+refreshTodayStat();
+setInterval(refreshTodayStat, 30000);
+
+// 왕복(가서 캐고 → 지고 와서 납품) 한 사이클이 너무 길면 도구 이벤트가 계속 밀린다 — 조금 빠르게.
+const WALK_SPEED = 6.0; // units/sec
+const WORKER_SEP = 1.9; // 워커끼리 최소 간격(사령관 "애들끼리 겹치면 안 됨")
+
+// ══════ §4 이동 — 스티어링 하나로 통일 (`_설계_워커시스템.md` §4) ══════
+// 24~32차의 "직선 이동 + 반경 밀어내기 + 접선 회피"는 서로 따로 붙어 싸웠다(벽붙음→뱅글뱅글).
+// 여기서는 매 프레임 이동 벡터를 **목표방향 + 장애물회피(웨이포인트) + 워커분리** 한 식으로 합친다.
+// 회피는 원 둘레를 따라 도는 게 아니라 **옆으로 비껴가는 웨이포인트를 한 번 잡고 지나면 버린다** —
+// 원 궤도에 갇히는 것 자체가 구조적으로 불가능해진다.
+const AVOID_MARGIN = 1.2;   // 건물 원 바깥으로 이만큼 더 벌려서 지나간다
+const WAYPOINT_HIT = 1.8;   // 웨이포인트를 지났다고 볼 거리
+
+// 선분 P→G가 원(C,r)을 지나는가 — 선분 위 최근접점까지의 거리로 판정
+function segHitsCircle(px, pz, gx, gz, cx, cz, r){
+  const vx = gx - px, vz = gz - pz;
+  const vv = vx*vx + vz*vz;
+  if (vv < 1e-6) return Math.hypot(cx-px, cz-pz) < r;
+  let t = ((cx-px)*vx + (cz-pz)*vz) / vv;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(cx - (px + vx*t), cz - (pz + vz*t)) < r;
+}
+// 경로가 건설 현장을 지나면 우회점을 한 번 계산한다.
+// ★우회점을 "원 위의 옆점"으로 잡았더니 **현재 위치에서 그 점까지의 직선이 원을 관통**할 수 있었다
+//   (원 위의 점을 향하는 직선은 접선이 아니다) → 밀려나고 다시 향하기를 반복하며 벽에 붙는다.
+//   그래서 **현재 위치에서 원에 그은 접선의 접점**을 쓴다 — 접점까지의 직선은 정의상 원을 지나지 않는다.
+function planDetour(w, gx, gz){
+  const px = w.group.position.x, pz = w.group.position.z;
+  // 경로가 지나는 장애물 중 **가장 먼저 마주치는(가까운) 것**을 기준으로 우회한다.
+  let hit = null, hitDist = Infinity;
+  for (const o of OBSTACLES){
+    const R = o.r + AVOID_MARGIN;
+    if (Math.hypot(gx - o.x, gz - o.z) <= R + 0.01) continue;      // 목적지가 그 건물 = 우회 불필요
+    if (!segHitsCircle(px, pz, gx, gz, o.x, o.z, R)) continue;
+    const d = Math.hypot(o.x - px, o.z - pz);
+    if (d < hitDist){ hitDist = d; hit = { o, R }; }
+  }
+  if (!hit) return null;
+  const buildSitePos = hit.o, R = hit.R;   // 아래 로직은 이 하나의 원을 기준으로 돈다
+  const cost = p => Math.hypot(p.x-px, p.z-pz) + Math.hypot(gx-p.x, gz-p.z);
+  const pick = (a, b) => cost(a) <= cost(b) ? a : b;
+
+  // ① 기본: 진행 방향의 **측면 통과점**(중심에서 목표 방향에 수직으로 R만큼) — 원을 넓게 비껴간다.
+  //    실측으로 이쪽이 접점보다 훨씬 여유 있게 지나간다(최소 건물거리 6.34 vs 5.65).
+  const dx = gx - px, dz = gz - pz, L = Math.hypot(dx, dz) || 1;
+  const nx = -dz/L, nz = dx/L;
+  const side = pick({ x: buildSitePos.x + nx*R, z: buildSitePos.z + nz*R },
+                    { x: buildSitePos.x - nx*R, z: buildSitePos.z - nz*R });
+  if (!segHitsCircle(px, pz, side.x, side.z, buildSitePos.x, buildSitePos.z, buildSiteRadius)) return side;
+
+  // ② 측면 통과점으로 가는 길 자체가 건물을 파고들면(원에 바짝 붙어 있을 때) 접점으로 폴백한다 —
+  //    접점까지의 직선은 정의상 원을 관통하지 않는다.
+  const vx = px - buildSitePos.x, vz = pz - buildSitePos.z;
+  const d = Math.hypot(vx, vz);
+  if (d <= R) return null; // 원 안 — 안전망(keepOutOfBuilding)이 먼저 밖으로 밀어낸다
+  const base = Math.atan2(vz, vx);
+  const spread = Math.acos(Math.min(1, R/d));
+  const pt = a => ({ x: buildSitePos.x + Math.cos(a)*R, z: buildSitePos.z + Math.sin(a)*R });
+  return pick(pt(base + spread), pt(base - spread));
+}
+// ★사령관 지적(2026-08-11) "건물들을 뚫고 지나가고 있고" — 충돌이 **건설현장 한 채**에만 걸려 있었다.
+//   대장간·제재소·시장이 생기면서 나머지는 그냥 통과했다. 장애물을 목록으로 일반화한다.
+const OBSTACLES = []; // {x, z, r} — 건설현장 + 작업장 건물
+function addObstacle(x, z, r){ OBSTACLES.push({ x, z, r }); }
+// 건물 안으로 파고든 좌표를 원 밖으로 되돌린다(이동·정지 양쪽에서 같은 규칙을 쓴다).
+function keepOutOfBuilding(p){
+  for (const o of OBSTACLES){
+    const dx = p.x - o.x, dz = p.z - o.z;
+    const d = Math.hypot(dx, dz);
+    if (d < o.r && d > 0.001){ p.x = o.x + (dx/d) * o.r; p.z = o.z + (dz/d) * o.r; }
+  }
+}
+// 서 있는 동안의 겹침 해소 — 이동 중에는 스티어링(③)이 처리하지만, 납품 지점처럼 여러 명이 같은 자리로
+// 몰리는 곳에서는 도착한 뒤 그대로 포개진다(사령관 "애들끼리 겹치면 안 됨"). 정지 상태에서도 서서히 벌린다.
+function resolveOverlap(w, dt){
+  const p = w.group.position;
+  let px = 0, pz = 0;
+  for (const o of workers.values()){
+    if (o === w || !o.group) continue;
+    let sx = p.x - o.group.position.x, sz = p.z - o.group.position.z;
+    let sd = Math.hypot(sx, sz);
+    if (sd >= WORKER_SEP) continue;
+    if (sd < 0.001){ // 완전히 포개진 경우 — 결정적인 방향으로 뗀다(새로고침해도 같은 결과)
+      const a = (w.jobId.charCodeAt(0) % 16) / 16 * Math.PI*2;
+      sx = Math.cos(a); sz = Math.sin(a); sd = 1;
+    }
+    const k = (WORKER_SEP - sd) / sd;
+    px += sx*k; pz += sz*k;
+  }
+  if (px === 0 && pz === 0) return;
+  const g = Math.min(1, dt*4) * 0.5; // 튀지 않게 서서히
+  p.x += px*g; p.z += pz*g;
+  keepOutOfBuilding(p);
+}
+// 한 프레임 이동. 목표 반경 + 1.3 안에 들어오면 true(도착) — 대상 종류(광물/나무/건물)와 무관한 동일 규칙.
+function steerWorker(w, dt){
+  const p = w.group.position;
+  const tx = w.target.x, tz = w.target.z;
+  let stopAt = Math.max(0.3, (w.target.r || 0) + 1.3);
+  // ★사령관 지적(2026-08-11) "벽에 아직도 박고 있는 애가 있음" — 실측: 목표가 건물 중심(NODES.build)인데
+  //   도착 판정이 1.3이었다. 건물 반경(5.65)이 목표에 안 붙은 것(건물 GLB가 로드되기 전에 배정되면
+  //   pickNode가 r을 못 붙인다)이 원인. 벽이 5.65에서 막는데 1.3까지 가야 도착이라 **영원히 도달 불가**,
+  //   그래서 벽을 계속 밀고 있었다. 목표가 건물 안이면 **벽 앞이 곧 도착**이 되도록 매 프레임 보정한다.
+  for (const o of OBSTACLES){
+    const dT = Math.hypot(tx - o.x, tz - o.z);
+    if (dT < o.r) stopAt = Math.max(stopAt, o.r - dT + 1.3);
+  }
+  const distGoal = Math.hypot(tx - p.x, tz - p.z);
+  if (distGoal <= stopAt){ w.waypoint = null; w._stuckSince = 0; w._flips = 0; w._lastDist = null; return true; }
+
+  // 진전 감시 — 어떤 이유로든 목표까지의 거리가 줄지 않으면 벽에 붙은 것이다.
+  // 위 두 수정으로 원인은 없앴지만, 같은 증상이 다른 경로로 재발하지 않게 안전망을 둔다.
+  if (w._lastDist == null || distGoal < w._lastDist - 0.25){ w._lastDist = distGoal; w._stuckSince = 0; }
+  else if (!w._stuckSince) w._stuckSince = nowMs();
+
+  // ① 웨이포인트 — 지났으면 버리고, 없으면 경로가 건물을 가로지를 때만 새로 잡는다
+  if (w.waypoint && Math.hypot(w.waypoint.x - p.x, w.waypoint.z - p.z) < WAYPOINT_HIT) w.waypoint = null;
+  // 2.5초 넘게 진전이 없으면 우회 방향을 반대로 뒤집어 본다(한쪽이 막혔다는 뜻)
+  if (w._stuckSince && nowMs() - w._stuckSince > 2500 && buildSitePos){
+    w.waypoint = w.waypoint
+      ? { x: 2*buildSitePos.x - w.waypoint.x, z: 2*buildSitePos.z - w.waypoint.z }
+      : planDetour(w, tx, tz);
+    w._stuckSince = nowMs();
+    w._flips = (w._flips || 0) + 1;
+    // 양쪽 다 막혔다면 이 목표는 포기한다(다른 자리로 재배정 / 그 자리에서 납품) — 멈춰 서 있는 것보다 낫다
+    if (w._flips >= 2) w._giveUp = true;
+  }
+  if (!w.waypoint) w.waypoint = planDetour(w, tx, tz);
+  const gx = w.waypoint ? w.waypoint.x : tx;
+  const gz = w.waypoint ? w.waypoint.z : tz;
+
+  // ② 목표방향
+  let vx = gx - p.x, vz = gz - p.z;
+  const gl = Math.hypot(vx, vz) || 1;
+  vx /= gl; vz /= gl;
+  // ③ 워커분리 — 가까울수록 세게 밀어낸다(위치를 직접 옮기지 않고 이동 벡터에 섞는다)
+  for (const o of workers.values()){
+    if (o === w || !o.group) continue;
+    const sx = p.x - o.group.position.x, sz = p.z - o.group.position.z;
+    const sd = Math.hypot(sx, sz);
+    if (sd < WORKER_SEP && sd > 0.001){
+      const k = ((WORKER_SEP - sd) / WORKER_SEP) * 1.4;
+      vx += (sx/sd) * k; vz += (sz/sd) * k;
+    }
+  }
+  const ml = Math.hypot(vx, vz) || 1;
+  const step = Math.min(WALK_SPEED*dt, Math.max(0.02, (w.waypoint ? gl : distGoal - stopAt)));
+  const mx = (vx/ml) * step, mz = (vz/ml) * step;
+  p.x += mx; p.z += mz;
+
+  // ④ 마지막 안전망 — 그래도 건물 안으로 파고들면 밖으로 밀어낸다(설계상 여기 걸릴 일은 거의 없다)
+  keepOutOfBuilding(p);
+
+  // 실제로 움직인 방향을 본다(회피 중엔 목표가 아니라 비껴가는 쪽을 봐야 자연스럽다)
+  const yaw = Math.atan2(mx, mz);
+  let d = yaw - w.group.rotation.y;
+  d = Math.atan2(Math.sin(d), Math.cos(d));
+  w.group.rotation.y += d * Math.min(1, dt*8);
+  // 짐을 지고 돌아올 땐 다른 걸음(Walking_B)으로 — 캐러 갈 때와 해올 때가 한눈에 구분된다.
+  ensureLoopAction(w, w.carrying ? 'Walking_B' : 'Walking_A');
+  return false;
+}
+// 대상을 정면으로 보게 회전만 맞춘다(위치 스냅은 하지 않는다 — 그게 "돌 속으로 들어가는" 원인이었다).
+function faceTarget(w){
+  if (!w.target) return;
+  // 건물 작업장은 목적지(서는 자리)가 아니라 `face`(모루/건물)를 바라봐야 두드리는 그림이 맞는다.
+  const f = w.target.face || w.target;
+  w.group.rotation.y = Math.atan2(f.x - w.group.position.x, f.z - w.group.position.z);
+}
+
+// ══════ §3 워커 상태 머신 — 단일 정의 (`_설계_워커시스템.md` §3) ══════
+// IDLE ─(작업 배정)→ TRAVEL ─(도착)→ WORK ─(대상 파괴)→ HAUL ─(건물 도착)→ DELIVER ─→ IDLE
+// 32차까지는 이 규칙이 animate 루프의 else-if 사슬에 흩어져 있어 한 곳을 고치면 옆이 깨졌다.
+// 상태 전이는 전부 이 함수 안에서만 일어난다.
+function tickWorker(w, now, dt){
+  const st = w.state || 'IDLE';
+  tickChat(w, now);
+  // 이동 중(TRAVEL/HAUL)에는 스티어링이 분리를 이미 섞어 처리한다 — 서 있는 상태만 따로 벌려준다.
+  if (st !== 'TRAVEL' && st !== 'HAUL') resolveOverlap(w, dt);
+  switch (st){
+
+    case 'TRAVEL': {
+      if (!w.target){ finishCycle(w); break; }
+      if (!steerWorker(w, dt)){
+        // 양쪽 우회가 다 막혀 포기한 경우 — 다른 자리로 다시 보낸다(제자리에 굳어 있지 않게)
+        if (w._giveUp){
+          w._giveUp = false; w._flips = 0; w._stuckSince = 0; w._lastDist = null;
+          const cat = w.pendingCategory;
+          const next = (cat === 'ore' || cat === 'forage') ? pickNode(cat) : null;
+          if (next && !next.broken){ w.target = next; w.waypoint = null; }
+          else finishCycle(w);
+        }
+        break;
+      }
+      faceTarget(w);
+      // 걸어오는 사이 다른 워커가 먼저 캐버린 대상 — 허공을 찍지 말고 다른 자리로 재배정한다
+      if (w.carryAfter && w.target.broken){
+        const cat = w.pendingCategory === 'forage' ? 'forage' : 'ore';
+        const next = pickNode(cat);
+        if (next && !next.broken){
+          w.target = next; w.waypoint = null;
+          w.workClip = animForCategory(cat); w.workHold = 2600;
+        } else finishCycle(w);
+        break;
+      }
+      playCategory(w, w.workClip, w.workHold);
+      // 노드 도착 = 캐내는 시점 — "+1 자원명" 팝업으로 뭘 얻었는지 보여준다
+      spawnYieldPopup(w.group.position.x, w.group.position.y + 3.2, w.group.position.z, w.resourceLabel || '작업', w.resourceColor);
+      sayChat(w, w.pendingCategory);   // 작업 시작 — 그 자리에 맞는 한마디
+      if (w.carryAfter){
+        w.state = 'WORK';
+        w._nextSwingAt = now + 420; // 스윙 타이밍 — 곡괭이/도끼가 실제로 대상을 깎는 리듬
+      } else if (w.craftAfter){
+        w.state = 'WORK';           // 대장간·제재소·시장·건설현장 — 그 자리에서 계속 작업
+        w._nextSwingAt = 0;         // 깎을 대상이 없으니 스윙(CSG)은 없다
+      } else {
+        finishCycle(w); // 보고(base)는 도착 동작으로 끝난다
+      }
+      break;
+    }
+
+    case 'WORK': {
+      // 스윙 주기마다 실제로 대상을 깎는다(CSG). 작업 유지시간(2.6초) 안에 파괴 임계치(광물 8·나무 5)에
+      // 도달하도록 간격을 역산해둔다 — 예전 480ms로는 5회에 그쳐 광물이 절대 안 부서졌다.
+      if (now <= w.holdUntil){
+        if (w.target && w._nextSwingAt && now >= w._nextSwingAt){
+          w._nextSwingAt = now + (w.pendingCategory === 'forage' ? 460 : 290);
+          const node = w.target;
+          const gy = groundAt(node.x, node.z) ?? w.group.position.y;
+          const hit = new THREE.Vector3(node.x, gy + Math.max(0.5, (node.r||1) * 0.8), node.z);
+          if (!node.broken){
+            if (w.pendingCategory === 'forage') chopNode(node, hit, w.group.position);
+            else carveNode(node, hit, new THREE.Vector3(node.x - w.group.position.x, 0, node.z - w.group.position.z).normalize());
+          }
+          // 부서지는 순간이 곧 채집 완료 — 남은 시간 동안 허공을 찍지 않는다
+          if (node.broken) w.holdUntil = now;
+        }
+        break;
+      }
+      // 건물 작업(제작형)은 운반이 없다 — 그 자리에서 결과물 팝업을 띄우고 한 사이클을 마친다.
+      if (w.craftAfter){
+        spawnYieldPopup(w.group.position.x, w.group.position.y + 3.2, w.group.position.z,
+          w.resourceLabel || '작업', w.resourceColor);
+        w.craftAfter = false;
+        finishCycle(w);
+        break;
+      }
+      if (!buildSitePos){ finishCycle(w); break; }
+      // 캐는 동작이 끝났다 → 자원을 지고 건설 현장으로 되돌아간다(사령관 요청의 "해오는" 구간)
+      equipTool(w, null);   // 연장을 내리고 손에 자원을 든다
+      setCarrying(w, true);
+      w.carryAfter = false;
+      w.target = { x: buildSitePos.x, z: buildSitePos.z, r: buildSiteRadius };
+      w.waypoint = null;
+      w.state = 'HAUL';
+      sayChat(w, 'haul');   // "아이고~ 힘들어라" — 짐 지고 돌아가는 구간
+      break;
+    }
+
+    case 'HAUL': {
+      if (!w.target){ finishCycle(w); break; }
+      if (!steerWorker(w, dt)){
+        // 건물 앞까지 못 갔는데 양쪽이 다 막혔다면 그 자리에서 내려놓는다(짐을 진 채 굳어 있지 않게)
+        if (!w._giveUp) break;
+        w._giveUp = false; w._flips = 0; w._stuckSince = 0; w._lastDist = null;
+      }
+      faceTarget(w);
+      playCategory(w, 'PickUp', 1100); // 도착해서 내려놓는 동작
+      setCarrying(w, false);
+      deliveredCount++; // ★건물 진행률의 유일한 입력 — 실제로 캐 와서 내려놓은 횟수
+      spawnYieldPopup(w.group.position.x, w.group.position.y + 3.2, w.group.position.z,
+        (w.resourceLabel||'자원') + ' 납품 ' + deliveredCount + '/' + DELIVERIES_PER_BUILDING, w.resourceColor);
+      w.state = 'DELIVER';
+      sayChat(w, 'deliver');
+      break;
+    }
+
+    case 'DELIVER': {
+      if (now > w.holdUntil) finishCycle(w); // 내려놓는 동작이 끝나면 한 사이클 종료
+      break;
+    }
+
+    default: { // IDLE
+      if (w._nextTool && now > w._nextAt){
+        const t = w._nextTool; w._nextTool = null;
+        sendToWork(w, t); // 큐에 밀려 있던 다음 작업 — 사이클 도중엔 목적지를 뺏기지 않는다
+      } else if (w.jobState === 'active' && now > (w._restUntil || 0)){
+        // ★사령관 지적(2026-08-11) "에이전트가 끝나는 것에 맞춰서 작업이 맞춰져야 의미가 있지 않나" —
+        //   지금까지는 **도구 이벤트 하나 = 한 사이클**이라, 에이전트는 계속 일하는데 이벤트 사이 공백에는
+        //   워커가 서 있었다(화면 대부분이 정지). 에이전트가 일하는 동안에는 워커도 쉬지 않고 이어서 일하고,
+        //   에이전트가 멈추거나(blocked) 끝나면(done) 워커도 같이 멈춘다 — 그래야 화면이 실제 상태를 뜻한다.
+        sendToWork(w, w._lastTool || 'Bash');
+      } else if (w.mixer && now > w.holdUntil){
+        // ★사령관 지적(2026-08-11) "안 움직이는 애들도 있음" — 도는 에이전트만 일하는 건 사양이 맞지만,
+        //   일 안 하는 워커가 전부 같은 자세로 굳어 있으면 죽은 것처럼 보인다. **왜 안 움직이는지**가
+        //   자세로 읽히게 상태별 대기 동작을 준다(발밑 링 색과 같은 정보를 몸으로도 보여준다).
+        ensureLoopAction(w, IDLE_BY_JOB[w.jobState] || IDLE_CLIP);
+      }
+    }
+  }
+}
+
+const clock = new THREE.Clock();
+function animate(){
+  requestAnimationFrame(animate);
+  const dt = clock.getDelta();
+  const now = nowMs();
+  for (const w of workers.values()){
+    if (w.mixer) w.mixer.update(dt);
+
+    // 이동·작업·납품 전이는 전부 상태 머신 한 곳에서(§3) — 이동은 스티어링 한 함수로(§4)
+    tickWorker(w, now, dt);
+
+    // 실제 섬 지형(BVH 레이캐스트)을 따라 y 갱신 — 평지가 아니라 굴곡 있는 real terrain이라 매 프레임 재측정.
+    //   환초라 두 육지점 사이 직선 이동이 순간적으로 라군(물) 위를 지날 수 있음 — null이면 마지막 유효 y 유지(물에 안 잠기게).
+    const gy = groundAt(w.group.position.x, w.group.position.z);
+    if (gy != null) w.group.position.y = gy + 0.02;
+
+    if (w.actionLabel.spr.visible && now > (w._labelUntil||0)) w.actionLabel.spr.visible = false;
+  }
+  ocean.update(dt);
+  tickMining(dt);
+  tickBuildSite(dt);
+  updateYieldPopups(dt);
+  if (grassMat) {
+    grassMat.uniforms.uTime.value = performance.now()*0.001;
+    grassMat.uniforms.uCamPos.value.copy(camera.position);
+    // ★하늘 이식(2026-08-10): 잔디 블레이드 셰이더는 씬 조명을 안 받는 자체 발광 계산이라, 밤이 되면
+    //   섬·워커·나무는 다 어두워지는데 잔디만 대낮처럼 밝게 남았다. 하늘의 밤 정도(night)로 같이 어둡게.
+    if (ctx.sky) grassMat.uniforms.uLight.value = 1 - ctx.sky.night * 0.78;
+    const md = 95*95;
+    for (const m of grassChunks) { const dx=m.position.x-camera.position.x, dz=m.position.z-camera.position.z; m.visible = (dx*dx+dz*dz) < md; }
+  }
+  // sky.js / nightsky.js가 ctx.onUpdate로 등록한 갱신(태양 궤도·조명 곡선·구름 시간·하늘 돔 레이마칭).
+  //   하나가 던져도 나머지 렌더가 멈추지 않게 개별로 감싼다.
+  for (const fn of _updaters) { try { fn(dt); } catch (e) { console.warn('[agentview] sky update fail', e); } }
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+// ══ 검증 훅 — 렌더 없이 상태 머신만 흘려보낸다 ══
+// 워커 이동·작업·납품은 rAF에 묶여 있어 백그라운드 자동화 탭에서는 원리상 관찰이 불가능했다.
+// 고정 dt로 tickWorker를 직접 돌려 "가서 → 캐고 → 지고 와서 → 납품"이 실제로 완주하는지 상태값으로 확인한다.
+// (렌더·믹서는 건드리지 않으므로 사령관 화면의 시각 판정을 대체하지는 못한다 — 로직 회귀 검증용)
+window.__simSteps = (seconds = 20, fps = 60) => {
+  const dt = 1/fps, n = Math.round(seconds*fps);
+  const seen = new Map(); // 워커별로 거쳐간 상태 순서
+  for (let i = 0; i < n; i++){
+    SIM_OFFSET += dt*1000;
+    const now = nowMs();
+    for (const [k, w] of workers){
+      tickWorker(w, now, dt);
+      const arr = seen.get(k) || (seen.set(k, []), seen.get(k));
+      const s = w.state || 'IDLE';
+      if (arr[arr.length-1] !== s) arr.push(s);
+    }
+  }
+  return { delivered: deliveredCount, path: Object.fromEntries([...seen].map(([k,v]) => [k, v.join('>')])) };
+};
+window.__steer = (w, dt) => steerWorker(w, dt); // 디버그 훅(경로 수렴만 따로 검증)
+window.__obstacles = OBSTACLES;                 // 건물 충돌 원 목록(건설현장 + 작업장 건물)
+// 건설 현장 상태 — "에이전트가 끝나야 건물이 완성된다"를 검증하기 위한 훅
+window.__buildInfo = () => ({ owner: buildOwnerId, ownerName: buildOwnerName, target: +buildTargetFill.toFixed(3),
+  shown: +buildFillShown.toFixed(3), delivered: deliveredCount, need: DELIVERIES_PER_BUILDING, doneAt: buildDoneAt });
+window.__updateBuildSite = (jobs) => updateBuildSite(jobs);
+window.__deliver = (n) => { deliveredCount += (n || 1); return deliveredCount; };
+window.__buildPos = () => buildSitePos && { x: buildSitePos.x, z: buildSitePos.z, r: buildSiteRadius };
+window.__wstate = () => [...workers.values()].map(w => ({
+  id: w.jobId, role: w.role || null, state: w.state || 'IDLE', cat: w.pendingCategory || null,
+  carrying: !!w.carrying, waypoint: !!w.waypoint,
+  distTarget: w.target ? +Math.hypot(w.target.x - w.group.position.x, w.target.z - w.group.position.z).toFixed(2) : null,
+  distBuild: buildSitePos ? +Math.hypot(buildSitePos.x - w.group.position.x, buildSitePos.z - w.group.position.z).toFixed(2) : null,
+  pos: [+w.group.position.x.toFixed(1), +w.group.position.z.toFixed(1)]
+}));
+
+// 현재 장면을 PNG로 서버에 저장한다 — 명시적으로 한 프레임 그린 직후 같은 틱에 toDataURL을 떠야
+// preserveDrawingBuffer 없이도 화면이 담긴다(늦으면 검은 그림만 나온다).
+window.__snap = async (width, type = 'image/png', quality = 0.9) => {
+  renderer.render(scene, camera);
+  const src = renderer.domElement;
+  let dataUrl;
+  if (width && width < src.width) {
+    const c = document.createElement('canvas');
+    c.width = width; c.height = Math.round(src.height * width / src.width);
+    c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
+    dataUrl = c.toDataURL(type, quality);
+  } else {
+    dataUrl = src.toDataURL(type, quality);
+  }
+  const r = await fetch('/api/snapshot', { method: 'POST', body: dataUrl });
+  return r.json();
+};
+
+// ══ 하늘·해·구름 (실제 게임 sky.js + nightsky.js 원본) ══
+// 순서는 게임 game.html과 동일: initSky → initNightSky. sky.js가 매 프레임 nightsky.setDayNight()로
+// 낮/노을/밤 곡선과 태양 방향을 넘기고, nightsky 돔이 그걸 받아 하늘 자체를 그린다.
+function initSkySystem(){
+  ctx.water = ocean; // sky.js가 태양 방향·수평선 색을 바다에 동기(uSunDir/uHorizonCol)
+  // sky.js는 태양(그림자 광원)을 `ctx.player.pos` 기준 500 거리에 놓아 그림자 프러스텀이 플레이어를 따라가게 한다.
+  // 이 대시보드엔 플레이어가 없고 카메라가 ANCHOR에 고정이므로, ANCHOR를 그 자리에 끼워 넣는다 —
+  // 안 하면 태양이 원점 기준으로 잡혀 ANCHOR(수십~수백 유닛 밖)의 그림자가 통째로 사라진다.
+  ctx.player = { pos: { get x(){ return ANCHOR.x; }, y: 0, get z(){ return ANCHOR.z; } } };
+  initSky(ctx);
+  initNightSky(ctx);
+  // ★사령관 선택(2026-08-10): 시간 흐름은 게임과 동일(20분에 하루 — 낮·노을·밤·별·달 전부).
+  //   밤엔 워커가 어둡게 보이는 건 감수하기로 한 선택. 필요하면 __daycycle(0)으로 멈추고 __settime(0.25)로 정오 고정.
+  ctx.sky.timeScale = 1;
+  ctx.sky.setTime(0.10); // 게임 기본 시작값과 동일(아침)
+  window.__daycycle = (v) => { ctx.sky.timeScale = (v == null ? 1 : +v); return ctx.sky.timeScale; };
+  window.__settime  = (t) => ctx.sky.setTime(t);
+  // sky.js는 게임 톤(ACESFilmic@0.62)을 강제로 설정한다. 이 대시보드는 20차에 실측으로 Neutral을 골랐고
+  // (ACES가 초록을 흙빛으로 뭉갠다) 22차에 지형 색을 겨우 맞춰놨으므로, 톤매퍼만 되돌려 그 색을 지킨다.
+  renderer.toneMapping = THREE.NeutralToneMapping;
+  console.log('[agentview] 하늘/해/구름 초기화 완료 — 20분 하루 사이클 가동, dayTime '+ctx.sky.getTime().toFixed(2)+'(__daycycle(0)으로 정지)');
+}
+
+(async () => {
+  await loadHomeIsland();
+  computeNodes();
+  try { initSkySystem(); } catch (e) { console.warn('[agentview] sky init fail', e); }
+  // ★사령관 확인(2026-08-08, 스크린샷으로 직접 확인): Sea Keep "Lonely Watcher"는 원본 바위 모델 자체에
+  //   구멍(시스택 디자인)이 뚫려 있어 어디에 놓든 그 틈으로 바다가 비쳐 보인다 — 산 위로 옮겨도 공중에 뜬
+  //   물 웅덩이로 보여 오히려 더 이상해짐. 메시를 얼굴 단위로 재편집하기 전까진 랜드마크를 뺀다.
+  // loadSeaKeepLandmark().catch(e => console.warn('[agentview] sea keep load fail', e));
+  await buildRealEnvironment(); // NODES.ore/forage를 실제 배치 결과로 채운 뒤에야 워커가 올바른 목적지로 걷는다
+  loadBuildSite().catch(e => console.warn('[agentview] build site load fail', e));
+  loadWorkBuildings().catch(e => console.warn('[agentview] work buildings load fail', e)); // 대장간·제재소·시장
+  poll();
+  setInterval(poll, 1000);
+})();
+
+// 사령관이 직접 드래그/휠로 카메라를 움직였으면 리사이즈 때 그 구도를 리셋하지 않는다.
+let userMovedCam = false;
+controls.addEventListener('start', () => { userMovedCam = true; });
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  // ★22차: 창 비율이 바뀌면 화면에 담기는 좌우 폭(FRAME_R)이 달라진다 — 세로로 긴 창에서 워커가 프레임 밖으로
+  //   밀려나던 문제와 같은 원인이라 리사이즈 때도 다시 맞춘다.
+  if (!userMovedCam && islandReady) fitCameraToAnchor();
+});
+</script>
+</body>
+</html>

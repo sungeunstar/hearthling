@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="en" class="lang-en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agentview — watch your AI agents work</title>
+<meta name="description" content="A local dashboard that turns your Claude Code sessions into a living game village. Every session is a worker. Open source, local-only.">
+<meta property="og:title" content="agentview — watch your AI agents work">
+<meta property="og:description" content="Your Claude Code sessions, rendered as a living game village. Open source, local-only.">
+<meta property="og:image" content="https://sungeunstar.github.io/agentview/assets/hero.jpg">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://code.iconify.design/iconify-icon/2.1.0/iconify-icon.min.js"></script>
+<style>
+  :root{
+    --bg:#08090b; --bg2:#0c0e11; --panel:#111318; --line:#1d2027;
+    --ink:#f0eee8; --ink-dim:#9a9890; --ink-faint:#5c5b55;
+    --amber:#e8a13c; --amber-soft:rgba(232,161,60,.14);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Geist","Pretendard Variable",Pretendard,sans-serif;
+    -webkit-font-smoothing:antialiased; overflow-x:hidden;
+  }
+  .lang-en .ko{display:none} .lang-ko .en{display:none}
+  .lang-ko body, .lang-ko .h1, .lang-ko p{word-break:keep-all}
+  .mono{font-family:"Geist Mono",monospace}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+  a{color:inherit;text-decoration:none}
+
+  /* nav */
+  nav{position:fixed;top:0;left:0;right:0;z-index:50;border-bottom:1px solid transparent;transition:background .25s,border-color .25s}
+  nav.scrolled{background:rgba(8,9,11,.82);backdrop-filter:blur(12px);border-color:var(--line)}
+  .nav-in{display:flex;align-items:center;justify-content:space-between;height:64px}
+  .logo{display:flex;align-items:center;gap:10px;font-weight:600;letter-spacing:-.01em}
+  .logo iconify-icon{color:var(--amber);font-size:22px}
+  .nav-right{display:flex;align-items:center;gap:10px}
+  .lang-btn{border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-size:13px;color:var(--ink-dim);cursor:pointer;background:none;font-family:inherit}
+  .lang-btn:hover{color:var(--ink);border-color:#2a2e37}
+  .gh-btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:8px;padding:7px 14px;font-size:13.5px;font-weight:500;transition:border-color .2s,background .2s}
+  .gh-btn:hover{border-color:#2a2e37;background:var(--panel)}
+
+  /* hero */
+  .hero{position:relative;padding:150px 0 40px;text-align:center}
+  .hero::before{content:"";position:absolute;inset:0;background:
+    radial-gradient(600px 340px at 50% 0%, var(--amber-soft), transparent 70%);pointer-events:none}
+  .hero > *{position:relative;z-index:1}
+  /* 유체 배경 — TOMOBAX HeroField의 GPU 유체(솔버 상수 동일), 색축만 앰버로 교체 */
+  .fluid{position:absolute;inset:0;z-index:0;overflow:hidden;pointer-events:none}
+  .fluid canvas{width:100%;height:100%;display:block}
+  .eyebrow{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:999px;padding:6px 14px;font-size:12.5px;color:var(--ink-dim);letter-spacing:.02em}
+  .eyebrow iconify-icon{color:var(--amber);font-size:15px}
+  .h1{font-size:clamp(34px,6vw,62px);font-weight:700;letter-spacing:-.03em;line-height:1.08;margin:26px 0 18px}
+  .h1 em{font-style:normal;color:var(--amber)}
+  .hero p.sub{font-size:clamp(15px,2vw,18px);color:var(--ink-dim);line-height:1.65;max-width:640px;margin:0 auto 34px}
+  .cta-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;align-items:center}
+  .btn-primary{display:inline-flex;align-items:center;gap:9px;background:var(--amber);color:#1a1204;font-weight:600;font-size:15px;padding:13px 24px;border-radius:10px;transition:transform .15s,box-shadow .15s;box-shadow:0 0 0 0 rgba(232,161,60,.35)}
+  .btn-primary:hover{transform:translateY(-1px);box-shadow:0 6px 24px rgba(232,161,60,.25)}
+  .cmd{display:inline-flex;align-items:center;gap:10px;border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:12px 16px;font-size:13.5px;color:var(--ink-dim);cursor:pointer;transition:border-color .2s}
+  .cmd:hover{border-color:#2a2e37}
+  .cmd .tick{color:var(--amber);display:none}
+  .cmd.copied .tick{display:inline-block}
+  .cmd.copied .cp{display:none}
+
+  .shot{margin:56px auto 0;max-width:1080px;padding:0 24px}
+  .shot .frame{border:1px solid var(--line);border-radius:16px;overflow:hidden;background:var(--bg2);box-shadow:0 30px 80px rgba(0,0,0,.55), 0 0 120px rgba(232,161,60,.06)}
+  .shot img{display:block;width:100%;height:auto}
+  .shot .cap{margin-top:14px;text-align:center;font-size:13px;color:var(--ink-faint)}
+
+  /* sections */
+  section{padding:96px 0}
+  .sect-label{display:flex;align-items:center;gap:10px;color:var(--amber);font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;margin-bottom:14px}
+  .h2{font-size:clamp(26px,3.6vw,38px);font-weight:700;letter-spacing:-.02em;line-height:1.2;margin-bottom:14px}
+  .lead{color:var(--ink-dim);font-size:16px;line-height:1.7;max-width:620px}
+
+  .how{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:44px}
+  .how .step{border:1px solid var(--line);border-radius:14px;background:var(--bg2);padding:26px 24px}
+  .how .n{font-family:"Geist Mono",monospace;color:var(--amber);font-size:13px;margin-bottom:14px}
+  .how h3{font-size:17px;font-weight:600;margin-bottom:8px;letter-spacing:-.01em}
+  .how p{font-size:14px;color:var(--ink-dim);line-height:1.65}
+
+  .feat{display:grid;grid-template-columns:1.25fr 1fr;gap:18px;margin-top:44px}
+  .feat .card{border:1px solid var(--line);border-radius:14px;background:var(--bg2);padding:28px;display:flex;flex-direction:column;gap:10px}
+  .feat .card.wide{grid-column:1/-1;flex-direction:row;align-items:center;gap:26px;background:linear-gradient(120deg,var(--bg2),#12100a)}
+  .feat iconify-icon{font-size:26px;color:var(--amber)}
+  .feat h3{font-size:18px;font-weight:600;letter-spacing:-.01em}
+  .feat p{font-size:14.5px;color:var(--ink-dim);line-height:1.65}
+
+  /* install */
+  .install-box{border:1px solid var(--line);border-radius:16px;background:var(--bg2);padding:34px;margin-top:40px}
+  .install-box .row{display:flex;align-items:center;justify-content:space-between;gap:14px;border:1px solid var(--line);background:#0a0b0e;border-radius:10px;padding:16px 18px;margin-top:14px;flex-wrap:wrap}
+  .install-box .row code{font-family:"Geist Mono",monospace;font-size:14px;color:var(--ink)}
+  .install-box .row code .dim{color:var(--ink-faint)}
+  .copy-sm{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-size:12.5px;color:var(--ink-dim);cursor:pointer;background:none;font-family:inherit}
+  .copy-sm:hover{color:var(--ink)}
+  .req{margin-top:18px;font-size:13.5px;color:var(--ink-faint);line-height:1.7}
+
+  /* faq */
+  .faq-list{margin-top:36px;border-top:1px solid var(--line)}
+  .faq-list details{border-bottom:1px solid var(--line);padding:22px 4px}
+  .faq-list summary{cursor:pointer;font-size:16.5px;font-weight:600;letter-spacing:-.01em;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:16px}
+  .faq-list summary::-webkit-details-marker{display:none}
+  .faq-list summary iconify-icon{color:var(--ink-faint);transition:transform .2s;flex:none}
+  .faq-list details[open] summary iconify-icon{transform:rotate(45deg)}
+  .faq-list .a{margin-top:12px;font-size:14.5px;color:var(--ink-dim);line-height:1.7;max-width:680px}
+
+  /* final cta */
+  .final{position:relative;text-align:center;padding:110px 0 120px}
+  .final::before{content:"";position:absolute;inset:0;background:radial-gradient(520px 300px at 50% 100%, var(--amber-soft), transparent 70%);pointer-events:none}
+
+  footer{border-top:1px solid var(--line);padding:28px 0;font-size:13px;color:var(--ink-faint)}
+  .foot-in{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap}
+  footer a:hover{color:var(--ink-dim)}
+
+  .reveal{opacity:0;transform:translateY(18px);transition:opacity .6s ease,transform .6s ease}
+  .reveal.in{opacity:1;transform:none}
+  @media (prefers-reduced-motion: reduce){ .reveal{opacity:1;transform:none;transition:none} }
+
+  @media (max-width:820px){
+    .how{grid-template-columns:1fr}
+    .feat{grid-template-columns:1fr}
+    .feat .card.wide{flex-direction:column;align-items:flex-start}
+    section{padding:72px 0}
+    .hero{padding-top:120px}
+  }
+</style>
+</head>
+<body>
+
+<nav id="nav">
+  <div class="wrap nav-in">
+    <a class="logo" href="#"><iconify-icon icon="solar:home-smile-bold"></iconify-icon>agentview</a>
+    <div class="nav-right">
+      <button class="lang-btn" id="langBtn" type="button">한국어</button>
+      <a class="gh-btn" href="https://github.com/sungeunstar/agentview" target="_blank" rel="noopener">
+        <iconify-icon icon="mdi:github"></iconify-icon><span>GitHub</span>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="fluid" id="fluid" aria-hidden="true"><canvas id="fluidCanvas"></canvas></div>
+  <div class="wrap">
+    <span class="eyebrow"><iconify-icon icon="solar:shield-check-linear"></iconify-icon>
+      <span class="en">Open source &middot; Runs 100% on your machine</span>
+      <span class="ko">오픈소스 &middot; 전부 내 컴퓨터 안에서 동작</span>
+    </span>
+    <h1 class="h1">
+      <span class="en">Your AI agents,<br>at work in a <em>living village</em></span>
+      <span class="ko">AI 에이전트가 일하는<br><em>살아 있는 마을</em></span>
+    </h1>
+    <p class="sub">
+      <span class="en">agentview reads your local Claude Code sessions and renders them as a game village. Every session is a worker — mining, logging, trading. When an agent finishes its job, a building goes up.</span>
+      <span class="ko">agentview는 내 컴퓨터의 Claude Code 세션 기록을 읽어 게임 마을로 그립니다. 세션 하나가 워커 한 명 — 캐고, 베고, 나릅니다. 에이전트가 일을 마치면 건물이 올라갑니다.</span>
+    </p>
+    <div class="cta-row">
+      <a class="btn-primary" href="https://github.com/sungeunstar/agentview" target="_blank" rel="noopener">
+        <iconify-icon icon="mdi:github"></iconify-icon>
+        <span class="en">Get it on GitHub</span><span class="ko">GitHub에서 받기</span>
+      </a>
+      <button class="cmd mono" type="button" data-copy="npx github:sungeunstar/agentview">
+        <span>npx github:sungeunstar/agentview</span>
+        <iconify-icon class="cp" icon="solar:copy-linear"></iconify-icon>
+        <iconify-icon class="tick" icon="solar:check-circle-bold"></iconify-icon>
+      </button>
+    </div>
+  </div>
+  <div class="shot reveal">
+    <div class="frame"><img src="assets/hero.jpg" alt="agentview village — workers labeled with model names building a village" width="2400" height="1191"></div>
+    <div class="cap">
+      <span class="en">A real capture — five live sessions, labeled by model, with a building under construction.</span>
+      <span class="ko">실제 화면 — 라이브 세션 다섯이 모델명 이름표를 달고 일하고, 가운데 건물이 올라가는 중입니다.</span>
+    </div>
+  </div>
+</header>
+
+<section id="how">
+  <div class="wrap">
+    <div class="sect-label reveal"><iconify-icon icon="solar:settings-linear"></iconify-icon>
+      <span class="en">How it works</span><span class="ko">동작 방식</span></div>
+    <h2 class="h2 reveal">
+      <span class="en">No account. No cloud. No telemetry.</span>
+      <span class="ko">계정 없음. 클라우드 없음. 전송 없음.</span>
+    </h2>
+    <p class="lead reveal">
+      <span class="en">Claude Code already writes session transcripts to your disk. agentview just reads them.</span>
+      <span class="ko">Claude Code는 이미 세션 기록을 내 디스크에 남깁니다. agentview는 그것을 읽기만 합니다.</span>
+    </p>
+    <div class="how">
+      <div class="step reveal"><div class="n">01</div>
+        <h3><span class="en">A tiny local server</span><span class="ko">작은 로컬 서버</span></h3>
+        <p><span class="en">One Node process, zero dependencies. It tails <span class="mono">~/.claude</span> session logs and serves a dashboard on localhost only.</span>
+        <span class="ko">의존성 없는 Node 프로세스 하나가 <span class="mono">~/.claude</span> 세션 기록을 읽어 localhost 전용 대시보드로 제공합니다.</span></p>
+      </div>
+      <div class="step reveal"><div class="n">02</div>
+        <h3><span class="en">Sessions become workers</span><span class="ko">세션이 워커가 된다</span></h3>
+        <p><span class="en">Live sessions and background agents appear as villagers, labeled with their model and generated tokens. Tool calls drive what they do.</span>
+        <span class="ko">라이브 세션과 백그라운드 에이전트가 마을 주민으로 나타나고, 모델명과 생성 토큰이 이름표에 붙습니다. 도구 호출이 행동을 정합니다.</span></p>
+      </div>
+      <div class="step reveal"><div class="n">03</div>
+        <h3><span class="en">Work becomes a village</span><span class="ko">작업이 마을이 된다</span></h3>
+        <p><span class="en">Reads, greps and bash runs turn into mining, logging and hauling. When an agent completes its task, the construction site becomes a finished building.</span>
+        <span class="ko">읽기·검색·명령 실행이 채굴·벌목·운반이 됩니다. 에이전트가 작업을 마치면 공사 중이던 자리에 건물이 완성됩니다.</span></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="features" style="background:var(--bg2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+  <div class="wrap">
+    <div class="sect-label reveal"><iconify-icon icon="solar:star-linear"></iconify-icon>
+      <span class="en">What you get</span><span class="ko">무엇이 담겼나</span></div>
+    <h2 class="h2 reveal">
+      <span class="en">A second monitor worth watching</span>
+      <span class="ko">두 번째 모니터에 켜 둘 이유</span>
+    </h2>
+    <div class="feat">
+      <div class="card wide reveal">
+        <iconify-icon icon="solar:users-group-two-rounded-linear"></iconify-icon>
+        <div>
+          <h3><span class="en">Live agent watchtower</span><span class="ko">에이전트 관제탑</span></h3>
+          <p><span class="en">Running several sessions in parallel? See at a glance which one is grinding, which one is idle, and which one just finished — without cycling through terminals.</span>
+          <span class="ko">세션을 여러 개 돌릴 때, 어떤 세션이 일하는 중이고 어떤 세션이 놀고 있는지 터미널을 오가지 않고 한 화면에서 봅니다.</span></p>
+        </div>
+      </div>
+      <div class="card reveal">
+        <iconify-icon icon="solar:chart-square-linear"></iconify-icon>
+        <h3><span class="en">Token ledger</span><span class="ko">토큰 장부</span></h3>
+        <p><span class="en">Daily and weekly generated-token totals per model, indexed incrementally from your transcripts. Cache reads excluded, so the number tracks real work.</span>
+        <span class="ko">모델별 일별·주별 생성 토큰 집계. 캐시 재읽기는 빼고 세므로 숫자가 실제 작업량을 따라갑니다.</span></p>
+      </div>
+      <div class="card reveal">
+        <iconify-icon icon="solar:lock-keyhole-linear"></iconify-icon>
+        <h3><span class="en">Local-only by design</span><span class="ko">설계부터 로컬 전용</span></h3>
+        <p><span class="en">Binds to 127.0.0.1. Your prompts and code never leave your machine — there is nothing to send them to.</span>
+        <span class="ko">127.0.0.1에만 열립니다. 프롬프트와 코드는 기기 밖으로 나가지 않습니다 — 보낼 곳 자체가 없습니다.</span></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <div class="sect-label reveal"><iconify-icon icon="solar:download-minimalistic-linear"></iconify-icon>
+      <span class="en">Install</span><span class="ko">설치</span></div>
+    <h2 class="h2 reveal">
+      <span class="en">One command</span><span class="ko">명령 한 줄</span>
+    </h2>
+    <div class="install-box reveal">
+      <div class="row">
+        <code>npx github:sungeunstar/agentview</code>
+        <button class="copy-sm" type="button" data-copy="npx github:sungeunstar/agentview">
+          <iconify-icon icon="solar:copy-linear"></iconify-icon>
+          <span class="en">Copy</span><span class="ko">복사</span></button>
+      </div>
+      <div class="row">
+        <code><span class="dim">or</span> git clone https://github.com/sungeunstar/agentview <span class="dim">&amp;&amp;</span> cd agentview <span class="dim">&amp;&amp;</span> npm start</code>
+        <button class="copy-sm" type="button" data-copy="git clone https://github.com/sungeunstar/agentview && cd agentview && npm start">
+          <iconify-icon icon="solar:copy-linear"></iconify-icon>
+          <span class="en">Copy</span><span class="ko">복사</span></button>
+      </div>
+      <p class="req">
+        <span class="en">Requires Node.js 18+ and Claude Code. Opens at <span class="mono">localhost:4577</span>. Options: <span class="mono">--port</span>, <span class="mono">--claude-home</span>, <span class="mono">--no-open</span>.</span>
+        <span class="ko">Node.js 18 이상과 Claude Code가 필요합니다. <span class="mono">localhost:4577</span>에서 열립니다. 옵션: <span class="mono">--port</span>, <span class="mono">--claude-home</span>, <span class="mono">--no-open</span>.</span>
+      </p>
+    </div>
+  </div>
+</section>
+
+<section id="faq" style="padding-top:0">
+  <div class="wrap">
+    <div class="sect-label reveal"><iconify-icon icon="solar:question-circle-linear"></iconify-icon>FAQ</div>
+    <div class="faq-list reveal">
+      <details>
+        <summary><span><span class="en">Does any of my data leave my machine?</span><span class="ko">내 데이터가 밖으로 나가나요?</span></span><iconify-icon icon="solar:add-circle-linear"></iconify-icon></summary>
+        <div class="a"><span class="en">No. The server binds to 127.0.0.1, makes no outbound requests, and has no accounts or telemetry. It only reads the transcript files Claude Code already stores locally.</span>
+        <span class="ko">아니요. 서버는 127.0.0.1에만 열리고, 바깥으로 요청을 보내지 않으며, 계정도 수집도 없습니다. Claude Code가 이미 로컬에 저장한 기록 파일을 읽기만 합니다.</span></div>
+      </details>
+      <details>
+        <summary><span><span class="en">Which platforms are supported?</span><span class="ko">어떤 플랫폼을 지원하나요?</span></span><iconify-icon icon="solar:add-circle-linear"></iconify-icon></summary>
+        <div class="a"><span class="en">Windows is tested today. macOS and Linux are supported in code (path detection, browser open) — reports and fixes are welcome on GitHub.</span>
+        <span class="ko">Windows에서 검증되었습니다. macOS와 Linux는 코드상 대응되어 있습니다(경로 탐지·브라우저 열기). 문제 제보는 GitHub으로 환영합니다.</span></div>
+      </details>
+      <details>
+        <summary><span><span class="en">What happens if Claude Code changes its log format?</span><span class="ko">Claude Code 기록 형식이 바뀌면요?</span></span><iconify-icon icon="solar:add-circle-linear"></iconify-icon></summary>
+        <div class="a"><span class="en">The transcript format is unofficial, so agentview parses defensively: unknown lines are skipped, the server never crashes on them, and the dashboard tells you if it stops recognizing the format.</span>
+        <span class="ko">기록 형식은 비공식이라 방어적으로 읽습니다. 모르는 줄은 건너뛰고, 그것 때문에 서버가 죽지 않으며, 형식을 알아보지 못하게 되면 화면에 알립니다.</span></div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<section class="final">
+  <div class="wrap">
+    <h2 class="h2 reveal">
+      <span class="en">Watch your agents build something</span>
+      <span class="ko">에이전트가 짓는 것을 지켜보세요</span>
+    </h2>
+    <p class="lead reveal" style="margin:0 auto 30px">
+      <span class="en">Free, MIT-licensed, and yours to fork.</span>
+      <span class="ko">무료, MIT 라이선스, 마음껏 포크하세요.</span>
+    </p>
+    <div class="cta-row reveal">
+      <a class="btn-primary" href="https://github.com/sungeunstar/agentview" target="_blank" rel="noopener">
+        <iconify-icon icon="solar:star-bold"></iconify-icon>
+        <span class="en">Star on GitHub</span><span class="ko">GitHub에서 별 누르기</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot-in">
+    <span>agentview &middot; MIT License</span>
+    <a href="https://github.com/sungeunstar/agentview" target="_blank" rel="noopener">github.com/sungeunstar/agentview</a>
+  </div>
+</footer>
+
+<script>
+  // 언어 토글 — html 클래스만 바꾸고 선택을 저장한다
+  const root = document.documentElement;
+  const langBtn = document.getElementById('langBtn');
+  function setLang(l){
+    root.classList.toggle('lang-ko', l === 'ko');
+    root.classList.toggle('lang-en', l !== 'ko');
+    root.lang = l;
+    langBtn.textContent = l === 'ko' ? 'English' : '한국어';
+    try { localStorage.setItem('agentview-lang', l); } catch(e){}
+  }
+  langBtn.addEventListener('click', () => setLang(root.classList.contains('lang-ko') ? 'en' : 'ko'));
+  // 기본은 영어. 한국어는 토글로만 전환한다(자동 감지 없음 — 사령관 지시 2026-08-12)
+  try {
+    const saved = localStorage.getItem('agentview-lang');
+    if (saved) setLang(saved);
+  } catch(e){}
+
+  // 복사 버튼
+  document.querySelectorAll('[data-copy]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(btn.dataset.copy); } catch(e){}
+      btn.classList.add('copied');
+      setTimeout(() => btn.classList.remove('copied'), 1600);
+    });
+  });
+
+  // 스크롤 등장 + 내비 배경
+  const io = new IntersectionObserver(es => es.forEach(e => {
+    if (e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); }
+  }), { threshold: .12 });
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+  const nav = document.getElementById('nav');
+  addEventListener('scroll', () => nav.classList.toggle('scrolled', scrollY > 8), { passive: true });
+</script>
+
+<script>
+// ── 히어로 유체 배경 ─────────────────────────────────────────────
+// TOMOBAX HeroField.tsx의 실제 GPU 유체 풀이를 그대로 옮겼다(바닐라 JS 포트).
+//   이류 → 와도 → 와도 강화 → 발산 → 압력 자코비 20회 → 그래디언트 차감
+// 솔버 상수(SIM 128 / DYE 512 / curlStrength 2.2 / 소산 1.6·0.85 / splat 반경·세기 /
+// dt 상한 0.0166 / RENDER_SCALE 0.72)는 원본과 동일 — 임의로 바꾸지 않는다.
+// 바뀐 것은 색축뿐이다: 딥스페이스/블루 → 바닥 검정(#08090b)/엠버/앰버(#e8a13c)/페일골드.
+(() => {
+  const host = document.getElementById('fluid');
+  const canvas = document.getElementById('fluidCanvas');
+  if (!host || !canvas) return;
+
+  const QUAD_VERT = `
+attribute vec2 aPos; varying vec2 vUv;
+void main(){ vUv = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }`;
+  const ADVECT = `
+precision highp float; varying vec2 vUv;
+uniform sampler2D uSource; uniform sampler2D uVelocity;
+uniform vec2 uTexel; uniform float uDt; uniform float uDissipation;
+void main(){
+  vec2 coord = vUv - uDt * texture2D(uVelocity, vUv).xy * uTexel;
+  gl_FragColor = texture2D(uSource, coord) / (1.0 + uDissipation * uDt);
+}`;
+  const DIVERGENCE = `
+precision highp float; varying vec2 vUv;
+uniform sampler2D uVelocity; uniform vec2 uTexel;
+void main(){
+  float l = texture2D(uVelocity, vUv - vec2(uTexel.x, 0.0)).x;
+  float r = texture2D(uVelocity, vUv + vec2(uTexel.x, 0.0)).x;
+  float b = texture2D(uVelocity, vUv - vec2(0.0, uTexel.y)).y;
+  float t = texture2D(uVelocity, vUv + vec2(0.0, uTexel.y)).y;
+  vec2 c = texture2D(uVelocity, vUv).xy;
+  if (vUv.x - uTexel.x < 0.0) l = -c.x;
+  if (vUv.x + uTexel.x > 1.0) r = -c.x;
+  if (vUv.y - uTexel.y < 0.0) b = -c.y;
+  if (vUv.y + uTexel.y > 1.0) t = -c.y;
+  gl_FragColor = vec4(0.5 * (r - l + t - b), 0.0, 0.0, 1.0);
+}`;
+  const CURL = `
+precision highp float; varying vec2 vUv;
+uniform sampler2D uVelocity; uniform vec2 uTexel;
+void main(){
+  float l = texture2D(uVelocity, vUv - vec2(uTexel.x, 0.0)).y;
+  float r = texture2D(uVelocity, vUv + vec2(uTexel.x, 0.0)).y;
+  float b = texture2D(uVelocity, vUv - vec2(0.0, uTexel.y)).x;
+  float t = texture2D(uVelocity, vUv + vec2(0.0, uTexel.y)).x;
+  gl_FragColor = vec4(0.5 * (r - l - t + b), 0.0, 0.0, 1.0);
+}`;
+  const VORTICITY = `
+precision highp float; varying vec2 vUv;
+uniform sampler2D uVelocity; uniform sampler2D uCurl;
+uniform vec2 uTexel; uniform float uCurlStrength; uniform float uDt;
+void main(){
+  float l = texture2D(uCurl, vUv - vec2(uTexel.x, 0.0)).x;
+  float r = texture2D(uCurl, vUv + vec2(uTexel.x, 0.0)).x;
+  float b = texture2D(uCurl, vUv - vec2(0.0, uTexel.y)).x;
+  float t = texture2D(uCurl, vUv + vec2(0.0, uTexel.y)).x;
+  float c = texture2D(uCurl, vUv).x;
+  vec2 force = 0.5 * vec2(abs(t) - abs(b), abs(r) - abs(l));
+  force /= length(force) + 0.0001;
+  force *= uCurlStrength * c;
+  force.y *= -1.0;
+  vec2 vel = texture2D(uVelocity, vUv).xy + force * uDt;
+  gl_FragColor = vec4(clamp(vel, -1000.0, 1000.0), 0.0, 1.0);
+}`;
+  const PRESSURE = `
+precision highp float; varying vec2 vUv;
+uniform sampler2D uPressure; uniform sampler2D uDivergence; uniform vec2 uTexel;
+void main(){
+  float l = texture2D(uPressure, vUv - vec2(uTexel.x, 0.0)).x;
+  float r = texture2D(uPressure, vUv + vec2(uTexel.x, 0.0)).x;
+  float b = texture2D(uPressure, vUv - vec2(0.0, uTexel.y)).x;
+  float t = texture2D(uPressure, vUv + vec2(0.0, uTexel.y)).x;
+  float d = texture2D(uDivergence, vUv).x;
+  gl_FragColor = vec4((l + r + b + t - d) * 0.25, 0.0, 0.0, 1.0);
+}`;
+  const GRADIENT = `
+precision highp float; varying vec2 vUv;
+uniform sampler2D uPressure; uniform sampler2D uVelocity; uniform vec2 uTexel;
+void main(){
+  float l = texture2D(uPressure, vUv - vec2(uTexel.x, 0.0)).x;
+  float r = texture2D(uPressure, vUv + vec2(uTexel.x, 0.0)).x;
+  float b = texture2D(uPressure, vUv - vec2(0.0, uTexel.y)).x;
+  float t = texture2D(uPressure, vUv + vec2(0.0, uTexel.y)).x;
+  vec2 vel = texture2D(uVelocity, vUv).xy - vec2(r - l, t - b);
+  gl_FragColor = vec4(vel, 0.0, 1.0);
+}`;
+  const SPLAT = `
+precision highp float; varying vec2 vUv;
+uniform sampler2D uTarget; uniform float uAspect;
+uniform vec3 uValue; uniform vec2 uPoint; uniform float uRadius;
+void main(){
+  vec2 p = vUv - uPoint;
+  p.x *= uAspect;
+  vec3 splat = exp(-dot(p, p) / uRadius) * uValue;
+  gl_FragColor = vec4(texture2D(uTarget, vUv).xyz + splat, 1.0);
+}`;
+  const CLEAR = `
+precision highp float; varying vec2 vUv;
+uniform sampler2D uTarget; uniform float uValue;
+void main(){ gl_FragColor = uValue * texture2D(uTarget, vUv); }`;
+  const DISPLAY = `
+precision highp float; varying vec2 vUv;
+uniform sampler2D uVelocity; uniform sampler2D uDye;
+uniform float uTime; uniform float uAspect; uniform float uWarp;
+vec2 hash2(vec2 p){
+  p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+  return fract(sin(p) * 43758.5453) * 2.0 - 1.0;
+}
+float hash1(vec2 p){ return fract(sin(dot(p, vec2(41.7, 289.1))) * 24634.6345); }
+float noise(vec2 p){
+  vec2 i = floor(p); vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(dot(hash2(i + vec2(0.0, 0.0)), f - vec2(0.0, 0.0)),
+        dot(hash2(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0)), u.x),
+    mix(dot(hash2(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0)),
+        dot(hash2(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0)), u.x),
+    u.y);
+}
+float fbm(vec2 p){
+  float v = 0.0; float a = 0.5;
+  for (int i = 0; i < 4; i++){ v += a * noise(p); p *= 2.03; a *= 0.5; }
+  return v;
+}
+void main(){
+  vec2 vel = texture2D(uVelocity, vUv).xy;
+  float dye = texture2D(uDye, vUv).x;
+  vec2 uv = vUv + vel * uWarp;
+  vec2 p = vec2(uv.x * uAspect, uv.y) * 0.62;
+  float t = uTime * 0.055;
+  vec2 q = vec2(fbm(p + vec2(0.0, t)), fbm(p + vec2(4.3, -t * 0.8)));
+  vec2 r = vec2(
+    fbm(p + 1.9 * q + vec2(1.7, 9.2) + t * 0.42),
+    fbm(p + 1.9 * q + vec2(8.3, 2.8) - t * 0.31)
+  );
+  float f = fbm(p + 2.4 * r);
+  float v = clamp(f * 1.45 + 0.5, 0.0, 1.0);
+  float fold = 1.0 - smoothstep(0.0, 0.26, abs(r.x - r.y));
+
+  // 색축: 페이지 바닥색(#08090b) → 깊은 엠버 → 앰버(#e8a13c) → 페일 골드
+  vec3 base  = vec3(0.031, 0.035, 0.043);
+  vec3 ember = vec3(0.145, 0.086, 0.031);
+  vec3 amber = vec3(0.910, 0.631, 0.235);
+  vec3 pale  = vec3(1.000, 0.914, 0.769);
+
+  vec3 col = mix(base, ember, smoothstep(0.06, 0.52, v));
+  col = mix(col, amber, smoothstep(0.52, 0.86, v) * 0.50);
+  col = mix(col, pale, smoothstep(0.90, 1.0, v) * 0.30);
+  col = mix(col, pale, fold * 0.12 * smoothstep(0.45, 0.9, v));
+
+  // 어두운 골에만 앉는 잔불 입자
+  vec2  cell = floor(p * 190.0);
+  float star = step(0.9975, hash1(cell));
+  float twinkle = 0.6 + 0.4 * sin(uTime * 1.7 + hash1(cell) * 42.0);
+  col += vec3(1.0, 0.82, 0.55) * star * twinkle * (1.0 - smoothstep(0.10, 0.42, v)) * 0.35;
+
+  // 저은 자국 — 커서가 지나간 자리가 앰버로 발광하며 유체를 따라 잦아든다
+  col += mix(amber, pale, smoothstep(0.25, 1.6, dye)) * (1.0 - exp(-dye * 1.6)) * 0.5;
+
+  // 아래 경계에서 페이지 배경으로 완전히 녹아든다(vUv.y=0이 화면 아래)
+  col = mix(base, col, smoothstep(0.0, 0.30, vUv.y));
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+  const opts = { alpha: false, antialias: false, depth: false, stencil: false };
+  const gl2 = canvas.getContext('webgl2', opts);
+  const gl = gl2 || canvas.getContext('webgl', opts);
+  if (!gl) return;
+
+  let internal, type;
+  if (gl2) {
+    if (!gl2.getExtension('EXT_color_buffer_float') && !gl2.getExtension('EXT_color_buffer_half_float')) return;
+    internal = gl2.RGBA16F; type = gl2.HALF_FLOAT;
+  } else {
+    const half = gl.getExtension('OES_texture_half_float');
+    if (!half || !gl.getExtension('OES_texture_half_float_linear') || !gl.getExtension('EXT_color_buffer_half_float')) return;
+    internal = gl.RGBA; type = half.HALF_FLOAT_OES;
+  }
+
+  function compile(t, src){
+    const s = gl.createShader(t);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { gl.deleteShader(s); return null; }
+    return s;
+  }
+  function program(frag){
+    const vs = compile(gl.VERTEX_SHADER, QUAD_VERT);
+    const fs = compile(gl.FRAGMENT_SHADER, frag);
+    if (!vs || !fs) return null;
+    const p = gl.createProgram();
+    gl.attachShader(p, vs); gl.attachShader(p, fs);
+    gl.bindAttribLocation(p, 0, 'aPos');
+    gl.linkProgram(p); gl.deleteShader(vs); gl.deleteShader(fs);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) return null;
+    const uniforms = {};
+    const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+    for (let i = 0; i < n; i++){ const info = gl.getActiveUniform(p, i); uniforms[info.name] = gl.getUniformLocation(p, info.name); }
+    return { p, uniforms };
+  }
+  const P = {
+    advect: program(ADVECT), divergence: program(DIVERGENCE), curl: program(CURL),
+    vorticity: program(VORTICITY), pressure: program(PRESSURE), gradient: program(GRADIENT),
+    splat: program(SPLAT), clear: program(CLEAR), display: program(DISPLAY)
+  };
+  if (Object.values(P).some(x => !x)) return;
+
+  const quad = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+
+  function makeFBO(w, h){
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, gl.RGBA, type, null);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    gl.viewport(0, 0, w, h);
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    return { tex, fbo, w, h, texel: [1 / w, 1 / h] };
+  }
+  function makeDouble(w, h){
+    let a = makeFBO(w, h), b = makeFBO(w, h);
+    return { get read(){ return a; }, get write(){ return b; }, get texel(){ return a.texel; }, swap(){ const t = a; a = b; b = t; } };
+  }
+
+  const SIM = 128, DYE = 512;
+  const velocity = makeDouble(SIM, SIM);
+  const dye = makeDouble(DYE, DYE);
+  const divergence = makeFBO(SIM, SIM);
+  const curl = makeFBO(SIM, SIM);
+  const pressure = makeDouble(SIM, SIM);
+
+  function useQuad(){
+    gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  }
+  function blit(target){
+    if (target){ gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo); gl.viewport(0, 0, target.w, target.h); }
+    else { gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, canvas.width, canvas.height); }
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+  function bind(tex, unit){ gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); return unit; }
+
+  // 커서 — 글자 위를 지나도 끊기지 않게 window에서 받는다
+  const queue = [];
+  let lastX = 0, lastY = 0, hasLast = false;
+  function onPointer(e){
+    const rect = host.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = 1 - (e.clientY - rect.top) / rect.height;
+    if (hasLast){
+      const dx = (x - lastX) * rect.width;
+      const dy = (y - lastY) * rect.height;
+      if (dx * dx + dy * dy > 0.01) queue.push({ x, y, dx, dy });
+    }
+    lastX = x; lastY = y; hasLast = true;
+  }
+  window.addEventListener('pointermove', onPointer, { passive: true });
+  window.addEventListener('pointerdown', onPointer, { passive: true });
+  host.addEventListener('pointerleave', () => { hasLast = false; });
+
+  function applySplats(aspect){
+    if (!queue.length) return;
+    const batch = queue.splice(0, Math.min(queue.length, 12));
+    gl.useProgram(P.splat.p);
+    for (const s of batch){
+      gl.uniform1i(P.splat.uniforms.uTarget, bind(velocity.read.tex, 0));
+      gl.uniform1f(P.splat.uniforms.uAspect, aspect);
+      gl.uniform2f(P.splat.uniforms.uPoint, s.x, s.y);
+      gl.uniform1f(P.splat.uniforms.uRadius, 0.00018);
+      gl.uniform3f(P.splat.uniforms.uValue, s.dx * 5.2, s.dy * 5.2, 0);
+      blit(velocity.write); velocity.swap();
+      gl.uniform1i(P.splat.uniforms.uTarget, bind(dye.read.tex, 0));
+      gl.uniform1f(P.splat.uniforms.uRadius, 0.00013);
+      gl.uniform3f(P.splat.uniforms.uValue, 0.55, 0, 0);
+      blit(dye.write); dye.swap();
+    }
+    queue.length = 0;
+  }
+
+  function step(dt, aspect){
+    useQuad();
+    gl.useProgram(P.curl.p);
+    gl.uniform2f(P.curl.uniforms.uTexel, velocity.texel[0], velocity.texel[1]);
+    gl.uniform1i(P.curl.uniforms.uVelocity, bind(velocity.read.tex, 0));
+    blit(curl);
+
+    gl.useProgram(P.vorticity.p);
+    gl.uniform2f(P.vorticity.uniforms.uTexel, velocity.texel[0], velocity.texel[1]);
+    gl.uniform1i(P.vorticity.uniforms.uVelocity, bind(velocity.read.tex, 0));
+    gl.uniform1i(P.vorticity.uniforms.uCurl, bind(curl.tex, 1));
+    gl.uniform1f(P.vorticity.uniforms.uCurlStrength, 2.2);
+    gl.uniform1f(P.vorticity.uniforms.uDt, dt);
+    blit(velocity.write); velocity.swap();
+
+    gl.useProgram(P.divergence.p);
+    gl.uniform2f(P.divergence.uniforms.uTexel, velocity.texel[0], velocity.texel[1]);
+    gl.uniform1i(P.divergence.uniforms.uVelocity, bind(velocity.read.tex, 0));
+    blit(divergence);
+
+    gl.useProgram(P.clear.p);
+    gl.uniform1i(P.clear.uniforms.uTarget, bind(pressure.read.tex, 0));
+    gl.uniform1f(P.clear.uniforms.uValue, 0.8);
+    blit(pressure.write); pressure.swap();
+
+    gl.useProgram(P.pressure.p);
+    gl.uniform2f(P.pressure.uniforms.uTexel, velocity.texel[0], velocity.texel[1]);
+    gl.uniform1i(P.pressure.uniforms.uDivergence, bind(divergence.tex, 0));
+    for (let i = 0; i < 20; i++){
+      gl.uniform1i(P.pressure.uniforms.uPressure, bind(pressure.read.tex, 1));
+      blit(pressure.write); pressure.swap();
+    }
+
+    gl.useProgram(P.gradient.p);
+    gl.uniform2f(P.gradient.uniforms.uTexel, velocity.texel[0], velocity.texel[1]);
+    gl.uniform1i(P.gradient.uniforms.uPressure, bind(pressure.read.tex, 0));
+    gl.uniform1i(P.gradient.uniforms.uVelocity, bind(velocity.read.tex, 1));
+    blit(velocity.write); velocity.swap();
+
+    gl.useProgram(P.advect.p);
+    gl.uniform2f(P.advect.uniforms.uTexel, velocity.texel[0], velocity.texel[1]);
+    gl.uniform1f(P.advect.uniforms.uDt, dt);
+    gl.uniform1i(P.advect.uniforms.uVelocity, bind(velocity.read.tex, 0));
+    gl.uniform1i(P.advect.uniforms.uSource, bind(velocity.read.tex, 0));
+    gl.uniform1f(P.advect.uniforms.uDissipation, 1.6);
+    blit(velocity.write); velocity.swap();
+
+    gl.uniform1i(P.advect.uniforms.uVelocity, bind(velocity.read.tex, 0));
+    gl.uniform1i(P.advect.uniforms.uSource, bind(dye.read.tex, 1));
+    gl.uniform1f(P.advect.uniforms.uDissipation, 0.85);
+    blit(dye.write); dye.swap();
+
+    applySplats(aspect);
+  }
+
+  let raf = 0, visible = true;
+  let last = performance.now();
+  const start = performance.now();
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const RENDER_SCALE = 0.72;
+
+  function resize(){
+    const w = host.clientWidth, h = host.clientHeight;
+    if (!w || !h) return false;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2) * RENDER_SCALE;
+    const pw = Math.max(1, Math.round(w * dpr));
+    const ph = Math.max(1, Math.round(h * dpr));
+    if (canvas.width !== pw || canvas.height !== ph){ canvas.width = pw; canvas.height = ph; }
+    return true;
+  }
+  function render(now){
+    const aspect = canvas.width / canvas.height;
+    const dt = Math.min((now - last) / 1000, 0.0166);
+    if (!reduced.matches) step(dt, aspect);
+    last = now;
+    useQuad();
+    gl.useProgram(P.display.p);
+    gl.uniform1i(P.display.uniforms.uVelocity, bind(velocity.read.tex, 0));
+    gl.uniform1i(P.display.uniforms.uDye, bind(dye.read.tex, 1));
+    gl.uniform1f(P.display.uniforms.uTime, reduced.matches ? 12 : (now - start) / 1000);
+    gl.uniform1f(P.display.uniforms.uAspect, aspect);
+    gl.uniform1f(P.display.uniforms.uWarp, 0.0016);
+    blit(null);
+  }
+  function loop(now){ render(now); raf = requestAnimationFrame(loop); }
+  function play(){ if (raf || reduced.matches) return; last = performance.now(); raf = requestAnimationFrame(loop); }
+  function pause(){ if (raf) cancelAnimationFrame(raf); raf = 0; }
+  function refresh(){
+    if (!resize()) return;
+    if (reduced.matches || !visible){ pause(); render(performance.now()); }
+    else play();
+  }
+  refresh();
+  new ResizeObserver(refresh).observe(host);
+  // 화면 밖이면 렌더를 멈춘다 — 스크롤로 지나간 뒤에도 GPU를 물고 있으면 안 된다
+  new IntersectionObserver(([entry]) => {
+    visible = entry.isIntersecting;
+    if (visible && !reduced.matches) play(); else pause();
+  }, { threshold: 0 }).observe(host);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) pause();
+    else if (visible && !reduced.matches) play();
+  });
+  reduced.addEventListener('change', refresh);
+})();
+</script>
+</body>
+</html>

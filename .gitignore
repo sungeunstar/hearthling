@@ -1,0 +1,14 @@
+# 개인 데이터 — 토큰 집계 캐시(내 세션 경로·사용량이 담긴다)와 스크린샷
+server/.usage-index.json
+server/.usage-index.json.bak
+server/snapshots/
+
+# 내부 작업 문서(공개 저장소에 올리지 않는다)
+work.md
+_PROJECT.md
+_brief.md
+_ref/
+_설계_워커시스템.md
+1.png
+
+node_modules/
