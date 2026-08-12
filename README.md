@@ -6,7 +6,7 @@ Watch your AI agents work — a local dashboard that renders your Claude Code se
 
 Every session is a worker. Reads, greps and bash runs become mining, logging and hauling. When an agent finishes its job, a building goes up. Workers wear their model name and generated-token count as a nameplate.
 
-**Website:** https://sungeunstar.github.io/hearthling/
+**Website:** https://hearthling.vercel.app
 
 ## Quick start
 
