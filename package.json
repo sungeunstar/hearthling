@@ -9,7 +9,7 @@
   "license": "MIT",
   "author": "sungeunstar",
   "bin": { "hearthling": "server/server.js" },
-  "files": ["server/", "public/", "start-hearthling.cmd"],
+  "files": ["server/server.js", "public/", "start-hearthling.cmd"],
   "scripts": { "start": "node server/server.js" },
   "engines": { "node": ">=18" }
 }
