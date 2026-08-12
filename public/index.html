@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8" />
-<title>agentview</title>
+<title>hearthling</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
 <style>
   /* ══ 게임 HUD (2026-08-11 재설계) ══
@@ -26,9 +26,9 @@
   #topbar .stat { display:flex; align-items:baseline; gap:6px; font-size:12px; color:var(--dim); }
   #topbar .stat b { font-size:15px; font-weight:700; color:var(--ink); }
   #topbar .sep { width:1px; height:16px; background:var(--line); }
-  #usageBtn { pointer-events:auto; background:rgba(255,255,255,.06); border:1px solid var(--line);
+  #usageBtn, #langBtn { pointer-events:auto; background:rgba(255,255,255,.06); border:1px solid var(--line);
     color:var(--ink); font:inherit; font-size:12px; padding:6px 12px; border-radius:8px; cursor:pointer; }
-  #usageBtn:hover { background:rgba(255,255,255,.12); }
+  #usageBtn:hover, #langBtn:hover { background:rgba(255,255,255,.12); }
 
   /* 하단 최근 활동 */
   #feed { position:fixed; left:0; right:0; bottom:0; z-index:12; padding:0 18px 14px;
@@ -109,13 +109,14 @@
 </head>
 <body>
 <div id="topbar">
-  <div class="brand">agent<em>view</em></div>
+  <div class="brand">hearth<em>ling</em></div>
   <div class="spacer"></div>
-  <div class="stat"><b class="num" id="stActive">0</b> 작업 중</div>
+  <div class="stat"><b class="num" id="stActive">0</b> <span id="stActiveLb">작업 중</span></div>
   <div class="sep"></div>
-  <div class="stat"><b class="num" id="stToday">–</b> 오늘 생성</div>
+  <div class="stat"><b class="num" id="stToday">–</b> <span id="stTodayLb">오늘 생성</span></div>
   <div class="sep"></div>
   <button id="usageBtn">사용량</button>
+  <button id="langBtn">EN</button>
 </div>
 <div id="usage"></div>
 <div id="feed"></div>
@@ -154,6 +155,38 @@ import { Brush, Evaluator, SUBTRACTION } from 'three-bvh-csg';
 import { initSky } from './modules/sky.js';
 import { initNightSky } from './modules/nightsky.js';
 
+// ══ 언어 — 저장된 선택 > 브라우저 언어(ko→한국어, 그 외 영어). 전환은 리로드로 단순하게. ══
+// 내부 상태 키(운반 모델 매칭 등)는 한국어 라벨을 그대로 쓰고, 화면에 그릴 때만 disp()로 번역한다 —
+// 라벨을 통째로 바꾸면 CARRY_MODEL 매칭이 깨진다.
+const LANG = (() => {
+  try { const s = localStorage.getItem('hearthling-lang'); if (s === 'ko' || s === 'en') return s; } catch(e){}
+  return (navigator.language || '').toLowerCase().startsWith('ko') ? 'ko' : 'en';
+})();
+const KO = LANG === 'ko';
+const DISP_EN = {
+  '나무':'Wood', '제작':'Planks', '보고':'Report', '벼림':'Forging', '목재':'Lumber', '교역':'Trade',
+  '작업':'Work', '자원':'Goods', '돌':'Stone', '석탄':'Coal', '철광석':'Iron', '구리':'Copper',
+  '주석':'Tin', '은':'Silver', '코발트':'Cobalt', '금':'Gold', '보석':'Gem',
+  '에이전트':'Agent', '기타':'other'
+};
+const disp = s => KO ? s : (DISP_EN[s] || s);
+
+// 정적 라벨은 한국어로 써 둔 것을 영어 모드에서 덮어쓴다. 전환 버튼은 저장 후 리로드.
+{
+  const langBtn = document.getElementById('langBtn');
+  langBtn.textContent = KO ? 'EN' : '한국어';
+  langBtn.onclick = () => {
+    try { localStorage.setItem('hearthling-lang', KO ? 'en' : 'ko'); } catch(e){}
+    location.reload();
+  };
+  if (!KO){
+    document.getElementById('stActiveLb').textContent = 'working';
+    document.getElementById('stTodayLb').textContent = 'generated today';
+    document.getElementById('usageBtn').textContent = 'Usage';
+    document.querySelector('#timeline .eyebrow').textContent = 'job history';
+  }
+}
+
 // ── 실제 게임(codex/tomob)과 동일한 BVH 가속 레이캐스트 — terrain.js의 groundAt과 같은 기법 ──
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -166,8 +199,8 @@ import('https://esm.sh/@dimforge/rapier3d-compat@0.14.0').then(async (mod) => {
   RAPIER = mod.default || mod;
   await RAPIER.init();
   physicsWorld = new RAPIER.World({ x: 0, y: -22, z: 0 });
-  console.log('[agentview] Rapier 물리엔진 초기화 완료(실제 게임과 동일 버전)');
-}).catch(e => console.warn('[agentview] Rapier load fail', e));
+  console.log('[hearthling] Rapier 물리엔진 초기화 완료(실제 게임과 동일 버전)');
+}).catch(e => console.warn('[hearthling] Rapier load fail', e));
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0c0f0a);
@@ -473,7 +506,7 @@ function findGreenBasinNear(x0, z0){
   const pool = open.length ? open : cands;
   let best = pool[0], bestRatio = -1;
   for (const c of pool){ const r = greenRatioAround(c.x, c.z); if (r > bestRatio){ bestRatio = r; best = c; } }
-  console.log('[agentview] ANCHOR 선정 — 후보 '+cands.length+'개(시야 트인 곳 '+open.length+'개) 중 주변 초록 비율 '+(bestRatio*100).toFixed(0)+'%인 지점');
+  console.log('[hearthling] ANCHOR 선정 — 후보 '+cands.length+'개(시야 트인 곳 '+open.length+'개) 중 주변 초록 비율 '+(bestRatio*100).toFixed(0)+'%인 지점');
   return { x: best.x, z: best.z, y: groundAt(best.x, best.z) ?? 0 };
 }
 // findLandNear는 "그 점 하나"만 육지면 통과라 해안선 바로 옆(물이 바짝 붙은 자리)도 잡힐 수 있다.
@@ -664,7 +697,7 @@ async function loadHomeIsland(){
   ANCHOR = { x: anchorSeed.x, z: anchorSeed.z };
   LAGOON_CENTER = atollLocal;
 
-  console.log('[agentview] 실제 홈 섬("시작의섬 카브") 로드 완료 — 전체 반경≈'+ISLAND_RADIUS.toFixed(1)+'m, 활동거점('+ANCHOR.x.toFixed(0)+','+ANCHOR.z.toFixed(0)+')');
+  console.log('[hearthling] 실제 홈 섬("시작의섬 카브") 로드 완료 — 전체 반경≈'+ISLAND_RADIUS.toFixed(1)+'m, 활동거점('+ANCHOR.x.toFixed(0)+','+ANCHOR.z.toFixed(0)+')');
   islandReady = true;
   fitCameraToAnchor();
   window.__islandGroup = group; window.__atlas = atlas; window.__THREE = THREE; window.__anchor = ANCHOR; // 디버그 훅
@@ -828,7 +861,7 @@ async function loadSeaKeepLandmark(){
   root.position.z += keepSpot.z - center.z;
   root.position.y += (keepGroundY != null ? keepGroundY : 0) - box.min.y; // 밑동을 실제 지형 표면에 맞춘다
   scene.add(root);
-  console.log('[agentview] Sea Keep "Lonely Watcher" 랜드마크 배치 완료(실제 육지 위, 백드롭 제거 '+removed.length+'개)');
+  console.log('[hearthling] Sea Keep "Lonely Watcher" 랜드마크 배치 완료(실제 육지 위, 백드롭 제거 '+removed.length+'개)');
 }
 
 const STATE_COLOR = {
@@ -899,9 +932,9 @@ const clipsReady = (async () => {
     try {
       const g = await load(ANIM_BASE + f);
       for (const c of g.animations) if (!sharedClips.has(c.name)) sharedClips.set(c.name, c);
-    } catch (e) { console.warn('[agentview] anim load fail', f, e); }
+    } catch (e) { console.warn('[hearthling] anim load fail', f, e); }
   }
-  console.log('[agentview] loaded clips:', [...sharedClips.keys()].join(', '));
+  console.log('[hearthling] loaded clips:', [...sharedClips.keys()].join(', '));
 })();
 
 // 중앙 건설 현장의 발치 클리어런스(나무/광물 스폰 금지 반경과 동일값) — 워커도 이 안쪽엔 안 선다.
@@ -975,7 +1008,9 @@ const IDLE_BY_JOB = { active:'Idle_A', blocked:'Idle_B', idle:'Idle_B', done:'Id
 // ★사령관 지시(2026-08-11) "대장간 건물 앞에서 모루에서 작업하는 애도 있어야" — 작업장을 6종으로 늘린다.
 //   광산·숲은 자원 노드가 있는 구역, 대장간·제재소·시장은 건물 앞 작업 지점, 건설현장은 납품처.
 const ROLE_CYCLE = ['ore', 'forage', 'smith', 'saw', 'trade', 'build'];
-const ROLE_NAME = { ore: '광부', forage: '나무꾼', smith: '대장장이', saw: '제재공', trade: '상인', build: '목수' };
+const ROLE_NAME = KO
+  ? { ore: '광부', forage: '나무꾼', smith: '대장장이', saw: '제재공', trade: '상인', build: '목수' }
+  : { ore: 'Miner', forage: 'Logger', smith: 'Smith', saw: 'Sawyer', trade: 'Trader', build: 'Carpenter' };
 let roleSeq = 0, charSeq = 0;
 function categoryFor(w, tool){
   const explicit = targetForTool(tool);
@@ -1047,7 +1082,7 @@ async function loadTreeProtos(){
     const mat = Array.isArray(src.material) ? src.material[0] : src.material;
     mat.side = THREE.DoubleSide; if (mat.map) mat.map.colorSpace = THREE.SRGBColorSpace; mat.needsUpdate = true;
     protos.push({ name, geo, mat });
-  }).catch(e => console.warn('[agentview] tree proto fail', name, e))));
+  }).catch(e => console.warn('[hearthling] tree proto fail', name, e))));
   return protos;
 }
 
@@ -1157,7 +1192,7 @@ async function loadOreRaw(it){
 }
 async function loadOreGeoCache(){
   const cache = {};
-  for (const k in ORE_GEO_SRC) { try { cache[k] = toSingleGeo(await loadOreRaw(ORE_GEO_SRC[k]), 3.0); } catch (e) { console.warn('[agentview] ore geo fail', k, e); } }
+  for (const k in ORE_GEO_SRC) { try { cache[k] = toSingleGeo(await loadOreRaw(ORE_GEO_SRC[k]), 3.0); } catch (e) { console.warn('[hearthling] ore geo fail', k, e); } }
   for (const ore of ORES) { ore.geo = cache[ore.src] || null; ore.mat = matFromLp(ore.lp); }
 }
 function pickOre(rnd){
@@ -1271,7 +1306,7 @@ function buildGrassReal(){
     g.instanceCount=n; g.boundingSphere=new THREE.Sphere(new THREE.Vector3(0,0.4,0), CHUNK*0.75+RAD+0.8);
     const mesh=new THREE.Mesh(g,grassMat); mesh.position.set(bk.ccx,0,bk.ccz); mesh.frustumCulled=true; scene.add(mesh); grassChunks.push(mesh);
   }
-  console.log('[agentview] 잔디 패치', grassChunks.length, '청크');
+  console.log('[hearthling] 잔디 패치', grassChunks.length, '청크');
 }
 
 async function buildRealEnvironment(){
@@ -1279,7 +1314,7 @@ async function buildRealEnvironment(){
   const treeList = placeTreesReal(treeProtos, ENV_CFG.trees, LAGOON_CENTER.x, LAGOON_CENTER.z, ATOLL_RADIUS);
   const oreList = placeOresReal(LAGOON_CENTER.x, LAGOON_CENTER.z, ATOLL_RADIUS);
   buildGrassReal();
-  console.log('[agentview] environment.js 이식 배치 완료 — 나무 '+treeList.length+', 광물 '+oreList.length+', 산 '+MOUNTAINS.length);
+  console.log('[hearthling] environment.js 이식 배치 완료 — 나무 '+treeList.length+', 광물 '+oreList.length+', 산 '+MOUNTAINS.length);
 
   // 노드 객체는 **공유 인스턴스**여야 한다 — carve/broken 상태가 어디서 참조하든 같이 반영돼야 한다.
   oreList.forEach(o => Object.assign(o, { r:o.r||1.2 }));
@@ -1331,7 +1366,7 @@ function carveNode(node, hitPoint, dir){
   sb.scale.setScalar(CARVE_R / 0.5); sb.position.copy(center); sb.updateMatrixWorld(true);
   let result;
   try { result = _csgEval.evaluate(b, sb, SUBTRACTION); }
-  catch (e) { console.warn('[agentview] CSG 실패', e && e.message); return; }
+  catch (e) { console.warn('[hearthling] CSG 실패', e && e.message); return; }
   result.material = b.material; result.castShadow = result.receiveShadow = true; result.updateMatrixWorld(true);
   scene.remove(b); scene.add(result); node.brush = result;
   spawnChips(hitPoint, 6, b.material.color);
@@ -1346,7 +1381,7 @@ function loadSplitGeo(){
   if (!_splitPending){
     _splitPending = new FBXLoader().loadAsync(REAL + 'ore/PT_Ore_Rock_01_split.fbx')
       .then(root => { _splitGeo = toSingleGeo(root, 3.0); return _splitGeo; })
-      .catch(e => { console.warn('[agentview] split 그루터기 로드 실패', e); return null; });
+      .catch(e => { console.warn('[hearthling] split 그루터기 로드 실패', e); return null; });
   }
   return _splitPending;
 }
@@ -1442,7 +1477,7 @@ function sliceTreeAt(mesh, cutWorldY){
     top   = _sliceEval.evaluate(base, mk(cutWorldY - BIG/2), SUBTRACTION); // 절단면 아래를 빼면 윗동
     base.updateMatrixWorld(true);
     stump = _sliceEval.evaluate(base, mk(cutWorldY + BIG/2), SUBTRACTION); // 절단면 위를 빼면 밑동
-  } catch (e) { console.warn('[agentview] 나무 절단 실패', e && e.message); return null; }
+  } catch (e) { console.warn('[hearthling] 나무 절단 실패', e && e.message); return null; }
   // useGroups 결과는 [겉 재질, 단면 재질] 2머티리얼 — 겉은 원본 나무 텍스처, 단면은 목재색
   const mats = [Array.isArray(mesh.material) ? mesh.material[0] : mesh.material, CAP_MAT];
   for (const o of [top, stump]) if (o){ o.material = mats; o.castShadow = o.receiveShadow = true; }
@@ -1568,7 +1603,7 @@ function layoutWorkSites(oreList, treeList){
   }
   gatherIntoSite(oreList, WORK_SITES.ore, true);
   gatherIntoSite(treeList, WORK_SITES.forage, false);
-  console.log('[agentview] 작업장 — 광산('+WORK_SITES.ore.members.length+') 숲('+WORK_SITES.forage.members.length+')');
+  console.log('[hearthling] 작업장 — 광산('+WORK_SITES.ore.members.length+') 숲('+WORK_SITES.forage.members.length+')');
   window.__sites = WORK_SITES; // 디버그 훅
 }
 // 구역에서 가까운 것들을 골라 **구역 안에 고르게** 재배치한다(원본 배치 개수는 유지, 위치만 모은다).
@@ -1677,7 +1712,7 @@ async function loadWorkBuildings(){
     const gy = groundAt(land.x, land.z) ?? 0;
     let root;
     try { root = await new Promise((res, rej) => gl.load(REAL + 'buildings/' + b.file, g => res(g.scene), undefined, rej)); }
-    catch (e){ console.warn('[agentview] 작업장 건물 로드 실패', b.file, e); continue; }
+    catch (e){ console.warn('[hearthling] 작업장 건물 로드 실패', b.file, e); continue; }
     root.traverse(o => { if (o.isMesh){ o.castShadow = true; o.receiveShadow = true; if (o.material && o.material.map) o.material.map.colorSpace = THREE.SRGBColorSpace; } });
     const bb0 = new THREE.Box3().setFromObject(root);
     const sz = new THREE.Vector3(); bb0.getSize(sz);
@@ -1725,9 +1760,9 @@ async function loadWorkBuildings(){
         ag.rotation.y = grp.rotation.y;
         scene.add(ag);
         WORK_SPOT[key].anvil = { x: anvilPos.x, z: anvilPos.z };
-      } catch (e){ console.warn('[agentview] 모루 로드 실패', e); }
+      } catch (e){ console.warn('[hearthling] 모루 로드 실패', e); }
     }
-    console.log('[agentview] 작업장 건물 —', b.name, '발자국', foot.toFixed(1), '작업지점', spot.x.toFixed(1), spot.z.toFixed(1));
+    console.log('[hearthling] 작업장 건물 —', b.name, '발자국', foot.toFixed(1), '작업지점', spot.x.toFixed(1), spot.z.toFixed(1));
   }
   window.__workSpots = WORK_SPOT; // 디버그 훅
 }
@@ -1870,7 +1905,7 @@ function tickBuildSite(dt){
     if (since > 0.4 && !buildDonePopped) {
       buildDonePopped = true;
       spawnYieldPopup(buildSitePos.x, buildSiteGroundY + buildSiteHeight + 3, buildSitePos.z,
-        '완성 · ' + (buildDoneName || '에이전트') + ' · ' + fmtTok(buildDoneTokens), '#ffe27a');
+        (KO ? '완성' : 'Complete') + ' · ' + (buildDoneName || disp('에이전트')) + ' · ' + fmtTok(buildDoneTokens), '#ffe27a');
     }
     // 다음 건물을 위해 리셋 — 고스트가 다시 떠오르고 게이지는 0부터
     if (since > 6) {
@@ -2026,7 +2061,7 @@ async function loadCharacterFor(w){
   await clipsReady;
   let g;
   try { g = await load('./assets/characters/' + file); }
-  catch (e) { console.warn('[agentview] char load fail', file, e); return; }
+  catch (e) { console.warn('[hearthling] char load fail', file, e); return; }
   const m = g.scene;
   m.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
   const box = new THREE.Box3().setFromObject(m);
@@ -2041,7 +2076,7 @@ async function loadCharacterFor(w){
   w.group.add(m);
   // 오른손 슬롯 본 — player.js와 동일하게 KayKit 리그의 `handslotr`를 찾아 도구를 붙일 자리로 쓴다.
   m.traverse(o => { if (o.isBone && o.name === 'handslotr') w.handSlot = o; });
-  if (!w.handSlot) console.warn('[agentview] handslotr 본을 못 찾음 —', file);
+  if (!w.handSlot) console.warn('[hearthling] handslotr 본을 못 찾음 —', file);
   // 모델이 늦게 도착한 사이에 이미 작업이 배정됐다면 지금 연장을 들려준다.
   if (w._wantTool) equipTool(w, w._wantTool);
 
@@ -2180,7 +2215,7 @@ function loadCarryProto(file){
       const s = 0.95 / Math.max(0.001, Math.max(sz.x, sz.y, sz.z));
       root.scale.setScalar(s);
       return root;
-    }).catch(e => { console.warn('[agentview] 자원 모델 로드 실패', file, e); return null; }));
+    }).catch(e => { console.warn('[hearthling] 자원 모델 로드 실패', file, e); return null; }));
   }
   return carryProtoCache.get(file);
 }
@@ -2208,7 +2243,7 @@ function loadToolProto(spec){
         else if (o.material && o.material.map) o.material.map.colorSpace = THREE.SRGBColorSpace;
       });
       return t;
-    }).catch(e => { console.warn('[agentview] 도구 모델 로드 실패', spec.file, e); return null; }));
+    }).catch(e => { console.warn('[hearthling] 도구 모델 로드 실패', spec.file, e); return null; }));
   }
   return toolProtoCache.get(spec.file);
 }
@@ -2281,7 +2316,7 @@ function spawnTransientChild(parentJobId, clipName){
 // "중간중간마다 게임 대화창처럼 에이전트들이 말하는 거 넣으면 좋겠는데 '아이고~ 힘들어라' 이러면서
 //  재밌는 요소로? npc들이 가끔 대화창으로 날리는 것처럼"
 // 상황(역할/상태)에 맞는 대사를 머리 위에 잠깐 띄운다. 너무 잦으면 시끄러우니 워커당 간격을 벌린다.
-const CHAT = {
+const CHAT = KO ? {
   ore:    ['여기 광맥이 실하네', '곡괭이가 무뎌졌어…', '한 번만 더 치면 되겠다', '어깨야…'],
   forage: ['이 나무 굵네', '넘어간다—!', '톱밥이 눈에 들어갔어', '도끼날 좀 갈아야겠다'],
   smith:  ['쇠는 달궈졌을 때 쳐야지', '아이고 팔이야', '불 좀 더 지펴줘', '이 정도면 잘 벼렸다'],
@@ -2294,6 +2329,19 @@ const CHAT = {
   blocked:['언제까지 기다려야 하나', '대답 좀 해주시오', '기다리는 게 제일 힘들어'],
   done:   ['오늘 일 끝!', '수고했다 다들', '이제 좀 쉬자'],
   failed: ['망했다…', '이게 왜 안 되지', '처음부터 다시 해야 하나'],
+} : {
+  ore:    ['This vein looks rich', 'Pickaxe is going dull…', 'One more swing should do it', 'Oh, my shoulders…'],
+  forage: ['A thick one, this tree', 'Timber—!', 'Sawdust in my eye', 'Time to sharpen the axe'],
+  smith:  ['Strike while the iron is hot', 'Oh, my arms', 'More air on the fire', 'Now that is a fine edge'],
+  saw:    ['Mind the grain', 'Just one more span', 'Sawing is the hardest work', 'Planks are done'],
+  trade:  ['What is the going rate today', 'Selling this at a loss', 'No customers today…', 'Better check the ledger'],
+  build:  ['Running low on nails', 'Sun will set on us', 'Keep that post straight', 'Just the roof left!'],
+  haul:   ['Phew… heavy work', 'Heavy, so heavy', 'My back is done for', 'Almost there'],
+  deliver:['Here you go', 'That is my share for today', 'Next load coming right up'],
+  idle:   ['Give me some work', 'So bored…', 'Time for a breather', 'Nice weather today'],
+  blocked:['How long must I wait', 'Somebody answer me', 'Waiting is the hardest part'],
+  done:   ['Work is done for today!', 'Good work, everyone', 'Time to rest'],
+  failed: ['It is ruined…', 'Why will this not work', 'Do I start over?'],
 };
 function sayChat(w, kind){
   const lines = CHAT[kind];
@@ -2345,7 +2393,8 @@ function fmtElapsed(iso){
   if (!iso) return '';
   const s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime())/1000));
   const m = Math.floor(s/60), r = s%60;
-  return m > 0 ? `${m}분 ${r}초` : `${r}초`;
+  if (KO) return m > 0 ? `${m}분 ${r}초` : `${r}초`;
+  return m > 0 ? `${m}m ${r}s` : `${r}s`;
 }
 
 // 모델 ID → 사람이 읽는 이름. `claude-opus-5[1m]`, `claude-sonnet-4-5-20250929`, `gpt-5-codex` 같은
@@ -2366,9 +2415,18 @@ function modelLabel(id){
 //   표기 자체를 **억/만**으로 바꾼다. 1만=10,000 · 1억=100,000,000.
 function fmtTok(n){
   n = Number(n) || 0;
-  if (n >= 1e8) return (n/1e8).toFixed(2) + '억';
-  if (n >= 1e6) return (n/1e4).toFixed(0) + '만';
-  if (n >= 1e4) return (n/1e4).toFixed(1) + '만';
+  if (KO){
+    if (n >= 1e8) return (n/1e8).toFixed(2) + '억';
+    if (n >= 1e6) return (n/1e4).toFixed(0) + '만';
+    if (n >= 1e4) return (n/1e4).toFixed(1) + '만';
+    return String(n);
+  }
+  // 영어는 글로벌 표준 K/M/B (억/만 규칙은 한국어 표시 전용)
+  if (n >= 1e9) return (n/1e9).toFixed(2) + 'B';
+  if (n >= 1e7) return (n/1e6).toFixed(0) + 'M';
+  if (n >= 1e6) return (n/1e6).toFixed(1) + 'M';
+  if (n >= 1e4) return (n/1e3).toFixed(0) + 'K';
+  if (n >= 1e3) return (n/1e3).toFixed(1) + 'K';
   return String(n);
 }
 // ══ 비용 환산 ══
@@ -2402,7 +2460,7 @@ const FEED_MAX = 3;
 const feedRows = [];
 function pushFeed(jobId, tool, detail){
   const j = latestJobs.find(x => x.jobId === jobId);
-  const who = j ? modelLabel(j.model) : '에이전트';
+  const who = disp(j ? modelLabel(j.model) : '에이전트');
   const w = workers.get(jobId);
   const role = w && w.role ? ROLE_NAME[w.role] : null;
   feedRows.unshift({ who: who + (role ? ' · ' + role : ''), what: tool + (detail ? ' — ' + detail.slice(0, 52) : '') });
@@ -2421,15 +2479,17 @@ function showPop(jobId, sx, sy){
   popJobId = jobId;
   const st = j.state || 'idle';
   const el = document.getElementById('pop');
+  let lastTool = j.lastTool || (j.detail || '').replace(/^마지막 도구: /, '');
+  if (lastTool === '작업 중' || lastTool === '대기 중') lastTool = '';
   el.innerHTML = `
-    <div class="ptop"><span class="pmodel">${modelLabel(j.model)}</span>
+    <div class="ptop"><span class="pmodel">${disp(modelLabel(j.model))}</span>
       <span class="st st-${st} pbadge">${st}</span></div>
     <div class="ptitle">${escapeHtml(j.name || j.jobId)}</div>
-    <div class="prow"><span>역할</span><b>${w.role ? ROLE_NAME[w.role] : '–'}</b></div>
-    <div class="prow"><span>생성 토큰</span><b class="num">${fmtTok(j.tokens || 0)}</b></div>
-    <div class="prow"><span>마지막 도구</span><b>${escapeHtml((j.detail || '').replace(/^마지막 도구: /, '') || '–')}</b></div>
-    <div class="prow"><span>경과</span><b class="num">${fmtElapsed(j.createdAt)}</b></div>
-    <button class="phist" data-jobid="${jobId}">히스토리 보기</button>`;
+    <div class="prow"><span>${KO ? '역할' : 'Role'}</span><b>${w.role ? ROLE_NAME[w.role] : '–'}</b></div>
+    <div class="prow"><span>${KO ? '생성 토큰' : 'Generated'}</span><b class="num">${fmtTok(j.tokens || 0)}</b></div>
+    <div class="prow"><span>${KO ? '마지막 도구' : 'Last tool'}</span><b>${escapeHtml(lastTool) || '–'}</b></div>
+    <div class="prow"><span>${KO ? '경과' : 'Elapsed'}</span><b class="num">${fmtElapsed(j.createdAt)}</b></div>
+    <button class="phist" data-jobid="${jobId}">${KO ? '히스토리 보기' : 'View history'}</button>`;
   el.classList.add('open');
   const r = el.getBoundingClientRect();
   el.style.left = Math.min(Math.max(10, sx - r.width/2), innerWidth - r.width - 10) + 'px';
@@ -2464,7 +2524,7 @@ async function poll(){
       w.jobState = j.state;
       // ★사령관 지시(2026-08-11) "에이전트 이름은 각각의 모델명, 소넷이나 오퍼스, gpt면 gpt 에이전트,
       //   그리고 토큰양이 보여야 할 듯" — 머리 위 이름표를 세션 제목에서 **모델명 + 누적 토큰**으로 교체.
-      const shown = modelLabel(j.model) + ' · ' + fmtTok(j.tokens || 0);
+      const shown = disp(modelLabel(j.model)) + ' · ' + fmtTok(j.tokens || 0);
       if (w._labelName !== shown){ w._labelName = shown; drawTextFit(w.idLabel, shown, '#cfd9c2', 20); }
     }
 
@@ -2493,12 +2553,14 @@ function relTime(iso){
   if (!iso) return '';
   const ms = Date.now() - new Date(iso).getTime();
   const m = Math.floor(ms/60000);
-  if (m < 1) return '방금';
-  if (m < 60) return m + '분 전';
-  const h = Math.floor(m/60); if (h < 24) return h + '시간 전';
-  return Math.floor(h/24) + '일 전';
+  if (m < 1) return KO ? '방금' : 'just now';
+  if (m < 60) return KO ? m + '분 전' : m + 'm ago';
+  const h = Math.floor(m/60); if (h < 24) return KO ? h + '시간 전' : h + 'h ago';
+  const d = Math.floor(h/24); return KO ? d + '일 전' : d + 'd ago';
 }
-const ST_LABEL = { active:'진행중', blocked:'대기', failed:'실패', done:'완료', completed:'완료', queued:'대기열' };
+const ST_LABEL = KO
+  ? { active:'진행중', blocked:'대기', failed:'실패', done:'완료', completed:'완료', queued:'대기열' }
+  : { active:'active', blocked:'waiting', failed:'failed', done:'done', completed:'done', queued:'queued' };
 
 // ══ 워커 클릭 → 말풍선 ══ (사령관 컨펌: "워커 클릭 → 말풍선으로")
 // 화면 전체가 게임이므로 캔버스 클릭을 레이캐스트해서 어떤 워커를 눌렀는지 찾는다.
@@ -2549,21 +2611,21 @@ async function openHistory(jobId){
   const j = latestJobs.find(x => x.jobId === jobId);
   const r = await fetch('/api/timeline?jobId=' + encodeURIComponent(jobId)).then(r=>r.json());
   document.getElementById('tlTitle').textContent = j && (j.name||jobId) || jobId;
-  document.getElementById('tlCount').textContent = jobId + ' · ' + r.timeline.length + '개 기록';
+  document.getElementById('tlCount').textContent = jobId + ' · ' + r.timeline.length + (KO ? '개 기록' : ' records');
   const rows = r.timeline.slice().reverse();
   document.getElementById('tlBody').innerHTML = rows.map((row, idx) => {
     const isUser = !row.text;
-    const who = isUser ? '사령관' : 'Claude';
+    const who = isUser ? (KO ? '사령관' : 'You') : 'Claude';
     const stPill = !isUser && row.state ? `<span class="pill st-${row.state}">${ST_LABEL[row.state]||row.state}</span>` : '';
-    const detail = escapeHtml(row.detail || (isUser ? '' : '(요약 없음)'));
+    const detail = escapeHtml(row.detail || (isUser ? '' : (KO ? '(요약 없음)' : '(no summary)')));
     const hasFull = row.text && row.text.trim() && row.text.trim() !== (row.detail||'').trim();
-    const toggle = hasFull ? `<button class="more" data-idx="${idx}">전체 응답 보기 ▾</button><div class="full" id="tlFull${idx}">${mdLite(row.text)}</div>` : '';
+    const toggle = hasFull ? `<button class="more" data-idx="${idx}">${KO ? '전체 응답 보기 ▾' : 'Show full reply ▾'}</button><div class="full" id="tlFull${idx}">${mdLite(row.text)}</div>` : '';
     return `<div class="turn ${isUser?'user':'assistant'}"><div class="bubble">
       <div class="bmeta"><span class="who">${who}</span>${stPill}<span title="${row.at||''}">${relTime(row.at)}</span></div>
       <div class="detail">${detail}</div>
       ${toggle}
     </div></div>`;
-  }).join('') || '<div class="empty">기록 없음</div>';
+  }).join('') || `<div class="empty">${KO ? '기록 없음' : 'No records'}</div>`;
   document.getElementById('timeline').classList.add('open');
 }
 document.getElementById('tlBody').addEventListener('click', (e) => {
@@ -2571,7 +2633,7 @@ document.getElementById('tlBody').addEventListener('click', (e) => {
   if (!btn) return;
   const full = document.getElementById('tlFull' + btn.dataset.idx);
   const show = full.classList.toggle('show');
-  btn.textContent = show ? '접기 ▴' : '전체 응답 보기 ▾';
+  btn.textContent = show ? (KO ? '접기 ▴' : 'Collapse ▴') : (KO ? '전체 응답 보기 ▾' : 'Show full reply ▾');
 });
 document.getElementById('tlClose').onclick = () => { document.getElementById('timeline').classList.remove('open'); };
 
@@ -2608,8 +2670,8 @@ function usageRows(rows, key, maxTotal, todayKey){
     const { total, per } = sumRow(r.byModel);
     const w = maxTotal ? (total/maxTotal*100) : 0;
     const segs = Object.entries(per).sort((a,b)=>b[1]-a[1]).map(([m,v]) =>
-      `<i style="width:${(v/Math.max(1,total)*100).toFixed(1)}%;background:${MODEL_COLOR[m]||MODEL_COLOR.기타}" title="${m} ${fmtTok(v)}"></i>`).join('');
-    const label = key === 'week' ? (r.week.slice(5).replace('-','/') + ' 주') : r.date.slice(5).replace('-','/');
+      `<i style="width:${(v/Math.max(1,total)*100).toFixed(1)}%;background:${MODEL_COLOR[m]||MODEL_COLOR.기타}" title="${disp(m)} ${fmtTok(v)}"></i>`).join('');
+    const label = key === 'week' ? (r.week.slice(5).replace('-','/') + (KO ? ' 주' : ' wk')) : r.date.slice(5).replace('-','/');
     const isToday = key !== 'week' && r.date === todayKey;
     return `<div class="row${isToday?' today':''}"><div class="lb">${label}</div>
       <div class="track" style="width:${Math.max(2,w).toFixed(1)}%">${segs}</div>
@@ -2618,10 +2680,11 @@ function usageRows(rows, key, maxTotal, todayKey){
 }
 async function renderUsage(){
   const box = document.getElementById('usage');
-  box.innerHTML = '<h4>토큰 사용량</h4><div class="sub">집계 중…</div>';
+  const H = KO ? '토큰 사용량' : 'Token usage';
+  box.innerHTML = `<h4>${H}</h4><div class="sub">${KO ? '집계 중…' : 'Indexing…'}</div>`;
   let u;
   try { u = await fetch('/api/usage?days=14').then(r=>r.json()); }
-  catch(e){ box.innerHTML = '<h4>토큰 사용량</h4><div class="sub">서버 응답 없음</div>'; return; }
+  catch(e){ box.innerHTML = `<h4>${H}</h4><div class="sub">${KO ? '서버 응답 없음' : 'Server unreachable'}</div>`; return; }
 
   const now = new Date();
   const todayKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
@@ -2640,16 +2703,17 @@ async function renderUsage(){
   const models = new Set();
   for (const d of u.days) for (const id in d.byModel) models.add(modelLabel(id) === '에이전트' ? '기타' : modelLabel(id));
 
+  const NO_DATA = `<div class="sub">${KO ? '기록 없음' : 'No data'}</div>`;
   box.innerHTML = `
-    <h4>토큰 사용량</h4>
-    <div class="sub">${u.scanning ? `집계 중 ${u.progress.done}/${u.progress.total}…` : `생성 토큰`}</div>
-    ${u.format && u.format.warning ? `<div class="sub" style="color:#e8a13c">기록 형식을 알아보지 못했다 — Claude Code 업데이트로 형식이 바뀌었을 수 있다</div>` : ''}
-    <div class="sect">최근 14일</div>${usageRows(u.days, 'date', dayMax, todayKey) || '<div class="sub">기록 없음</div>'}
-    <div class="sect">주별</div>${usageRows(u.weeks, 'week', weekMax) || '<div class="sub">기록 없음</div>'}
-    <div class="legend">${[...models].map(m=>`<span><i style="background:${MODEL_COLOR[m]||MODEL_COLOR.기타}"></i>${m}</span>`).join('')}</div>
-    <div class="tot"><span>오늘</span><b>${fmtTok(tSum?tSum.out:0)}</b></div>
-    <div class="tot"><span>이번 주</span><b>${fmtTok(wSum?wSum.out:0)}</b></div>
-    <div class="tot"><span>최근 14일</span><b>${fmtTok(grand)}</b></div>`;
+    <h4>${KO ? '토큰 사용량' : 'Token usage'}</h4>
+    <div class="sub">${u.scanning ? (KO ? `집계 중 ${u.progress.done}/${u.progress.total}…` : `Indexing ${u.progress.done}/${u.progress.total}…`) : (KO ? `생성 토큰` : `generated tokens`)}</div>
+    ${u.format && u.format.warning ? `<div class="sub" style="color:#e8a13c">${KO ? '기록 형식을 알아보지 못했다 — Claude Code 업데이트로 형식이 바뀌었을 수 있다' : 'Could not recognize the transcript format — a Claude Code update may have changed it'}</div>` : ''}
+    <div class="sect">${KO ? '최근 14일' : 'Last 14 days'}</div>${usageRows(u.days, 'date', dayMax, todayKey) || NO_DATA}
+    <div class="sect">${KO ? '주별' : 'Weekly'}</div>${usageRows(u.weeks, 'week', weekMax) || NO_DATA}
+    <div class="legend">${[...models].map(m=>`<span><i style="background:${MODEL_COLOR[m]||MODEL_COLOR.기타}"></i>${disp(m)}</span>`).join('')}</div>
+    <div class="tot"><span>${KO ? '오늘' : 'Today'}</span><b>${fmtTok(tSum?tSum.out:0)}</b></div>
+    <div class="tot"><span>${KO ? '이번 주' : 'This week'}</span><b>${fmtTok(wSum?wSum.out:0)}</b></div>
+    <div class="tot"><span>${KO ? '최근 14일' : 'Last 14 days'}</span><b>${fmtTok(grand)}</b></div>`;
 }
 document.getElementById('usageBtn').onclick = () => {
   const box = document.getElementById('usage');
@@ -2875,7 +2939,7 @@ function tickWorker(w, now, dt){
       }
       playCategory(w, w.workClip, w.workHold);
       // 노드 도착 = 캐내는 시점 — "+1 자원명" 팝업으로 뭘 얻었는지 보여준다
-      spawnYieldPopup(w.group.position.x, w.group.position.y + 3.2, w.group.position.z, w.resourceLabel || '작업', w.resourceColor);
+      spawnYieldPopup(w.group.position.x, w.group.position.y + 3.2, w.group.position.z, disp(w.resourceLabel || '작업'), w.resourceColor);
       sayChat(w, w.pendingCategory);   // 작업 시작 — 그 자리에 맞는 한마디
       if (w.carryAfter){
         w.state = 'WORK';
@@ -2910,7 +2974,7 @@ function tickWorker(w, now, dt){
       // 건물 작업(제작형)은 운반이 없다 — 그 자리에서 결과물 팝업을 띄우고 한 사이클을 마친다.
       if (w.craftAfter){
         spawnYieldPopup(w.group.position.x, w.group.position.y + 3.2, w.group.position.z,
-          w.resourceLabel || '작업', w.resourceColor);
+          disp(w.resourceLabel || '작업'), w.resourceColor);
         w.craftAfter = false;
         finishCycle(w);
         break;
@@ -2939,7 +3003,8 @@ function tickWorker(w, now, dt){
       setCarrying(w, false);
       deliveredCount++; // ★건물 진행률의 유일한 입력 — 실제로 캐 와서 내려놓은 횟수
       spawnYieldPopup(w.group.position.x, w.group.position.y + 3.2, w.group.position.z,
-        (w.resourceLabel||'자원') + ' 납품 ' + deliveredCount + '/' + DELIVERIES_PER_BUILDING, w.resourceColor);
+        KO ? (w.resourceLabel||'자원') + ' 납품 ' + deliveredCount + '/' + DELIVERIES_PER_BUILDING
+           : disp(w.resourceLabel||'자원') + ' delivered ' + deliveredCount + '/' + DELIVERIES_PER_BUILDING, w.resourceColor);
       w.state = 'DELIVER';
       sayChat(w, 'deliver');
       break;
@@ -3003,7 +3068,7 @@ function animate(){
   }
   // sky.js / nightsky.js가 ctx.onUpdate로 등록한 갱신(태양 궤도·조명 곡선·구름 시간·하늘 돔 레이마칭).
   //   하나가 던져도 나머지 렌더가 멈추지 않게 개별로 감싼다.
-  for (const fn of _updaters) { try { fn(dt); } catch (e) { console.warn('[agentview] sky update fail', e); } }
+  for (const fn of _updaters) { try { fn(dt); } catch (e) { console.warn('[hearthling] sky update fail', e); } }
   controls.update();
   renderer.render(scene, camera);
 }
@@ -3082,20 +3147,20 @@ function initSkySystem(){
   // sky.js는 게임 톤(ACESFilmic@0.62)을 강제로 설정한다. 이 대시보드는 20차에 실측으로 Neutral을 골랐고
   // (ACES가 초록을 흙빛으로 뭉갠다) 22차에 지형 색을 겨우 맞춰놨으므로, 톤매퍼만 되돌려 그 색을 지킨다.
   renderer.toneMapping = THREE.NeutralToneMapping;
-  console.log('[agentview] 하늘/해/구름 초기화 완료 — 20분 하루 사이클 가동, dayTime '+ctx.sky.getTime().toFixed(2)+'(__daycycle(0)으로 정지)');
+  console.log('[hearthling] 하늘/해/구름 초기화 완료 — 20분 하루 사이클 가동, dayTime '+ctx.sky.getTime().toFixed(2)+'(__daycycle(0)으로 정지)');
 }
 
 (async () => {
   await loadHomeIsland();
   computeNodes();
-  try { initSkySystem(); } catch (e) { console.warn('[agentview] sky init fail', e); }
+  try { initSkySystem(); } catch (e) { console.warn('[hearthling] sky init fail', e); }
   // ★사령관 확인(2026-08-08, 스크린샷으로 직접 확인): Sea Keep "Lonely Watcher"는 원본 바위 모델 자체에
   //   구멍(시스택 디자인)이 뚫려 있어 어디에 놓든 그 틈으로 바다가 비쳐 보인다 — 산 위로 옮겨도 공중에 뜬
   //   물 웅덩이로 보여 오히려 더 이상해짐. 메시를 얼굴 단위로 재편집하기 전까진 랜드마크를 뺀다.
-  // loadSeaKeepLandmark().catch(e => console.warn('[agentview] sea keep load fail', e));
+  // loadSeaKeepLandmark().catch(e => console.warn('[hearthling] sea keep load fail', e));
   await buildRealEnvironment(); // NODES.ore/forage를 실제 배치 결과로 채운 뒤에야 워커가 올바른 목적지로 걷는다
-  loadBuildSite().catch(e => console.warn('[agentview] build site load fail', e));
-  loadWorkBuildings().catch(e => console.warn('[agentview] work buildings load fail', e)); // 대장간·제재소·시장
+  loadBuildSite().catch(e => console.warn('[hearthling] build site load fail', e));
+  loadWorkBuildings().catch(e => console.warn('[hearthling] work buildings load fail', e)); // 대장간·제재소·시장
   poll();
   setInterval(poll, 1000);
 })();

@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>agentview — watch your AI agents work</title>
+<title>hearthling — watch your AI agents work</title>
 <meta name="description" content="A local dashboard that turns your Claude Code sessions into a living game village. Every session is a worker. Open source, local-only.">
-<meta property="og:title" content="agentview — watch your AI agents work">
+<meta property="og:title" content="hearthling — watch your AI agents work">
 <meta property="og:description" content="Your Claude Code sessions, rendered as a living game village. Open source, local-only.">
-<meta property="og:image" content="https://sungeunstar.github.io/agentview/assets/hero.jpg">
+<meta property="og:image" content="https://sungeunstar.github.io/hearthling/assets/hero.jpg">
 <meta property="og:type" content="website">
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
@@ -135,10 +135,10 @@
 
 <nav id="nav">
   <div class="wrap nav-in">
-    <a class="logo" href="#"><iconify-icon icon="solar:home-smile-bold"></iconify-icon>agentview</a>
+    <a class="logo" href="#"><iconify-icon icon="solar:home-smile-bold"></iconify-icon>hearthling</a>
     <div class="nav-right">
       <button class="lang-btn" id="langBtn" type="button">한국어</button>
-      <a class="gh-btn" href="https://github.com/sungeunstar/agentview" target="_blank" rel="noopener">
+      <a class="gh-btn" href="https://github.com/sungeunstar/hearthling" target="_blank" rel="noopener">
         <iconify-icon icon="mdi:github"></iconify-icon><span>GitHub</span>
       </a>
     </div>
@@ -157,23 +157,23 @@
       <span class="ko">AI 에이전트가 일하는<br><em>살아 있는 마을</em></span>
     </h1>
     <p class="sub">
-      <span class="en">agentview reads your local Claude Code sessions and renders them as a game village. Every session is a worker — mining, logging, trading. When an agent finishes its job, a building goes up.</span>
-      <span class="ko">agentview는 내 컴퓨터의 Claude Code 세션 기록을 읽어 게임 마을로 그립니다. 세션 하나가 워커 한 명 — 캐고, 베고, 나릅니다. 에이전트가 일을 마치면 건물이 올라갑니다.</span>
+      <span class="en">hearthling reads your local Claude Code sessions and renders them as a game village. Every session is a worker — mining, logging, trading. When an agent finishes its job, a building goes up.</span>
+      <span class="ko">hearthling는 내 컴퓨터의 Claude Code 세션 기록을 읽어 게임 마을로 그립니다. 세션 하나가 워커 한 명 — 캐고, 베고, 나릅니다. 에이전트가 일을 마치면 건물이 올라갑니다.</span>
     </p>
     <div class="cta-row">
-      <a class="btn-primary" href="https://github.com/sungeunstar/agentview" target="_blank" rel="noopener">
+      <a class="btn-primary" href="https://github.com/sungeunstar/hearthling" target="_blank" rel="noopener">
         <iconify-icon icon="mdi:github"></iconify-icon>
         <span class="en">Get it on GitHub</span><span class="ko">GitHub에서 받기</span>
       </a>
-      <button class="cmd mono" type="button" data-copy="npx github:sungeunstar/agentview">
-        <span>npx github:sungeunstar/agentview</span>
+      <button class="cmd mono" type="button" data-copy="npx github:sungeunstar/hearthling">
+        <span>npx github:sungeunstar/hearthling</span>
         <iconify-icon class="cp" icon="solar:copy-linear"></iconify-icon>
         <iconify-icon class="tick" icon="solar:check-circle-bold"></iconify-icon>
       </button>
     </div>
   </div>
   <div class="shot reveal">
-    <div class="frame"><img src="assets/hero.jpg" alt="agentview village — workers labeled with model names building a village" width="2400" height="1191"></div>
+    <div class="frame"><img src="assets/hero.jpg" alt="hearthling village — workers labeled with model names building a village" width="2400" height="1191"></div>
     <div class="cap">
       <span class="en">A real capture — five live sessions, labeled by model, with a building under construction.</span>
       <span class="ko">실제 화면 — 라이브 세션 다섯이 모델명 이름표를 달고 일하고, 가운데 건물이 올라가는 중입니다.</span>
@@ -190,8 +190,8 @@
       <span class="ko">계정 없음. 클라우드 없음. 전송 없음.</span>
     </h2>
     <p class="lead reveal">
-      <span class="en">Claude Code already writes session transcripts to your disk. agentview just reads them.</span>
-      <span class="ko">Claude Code는 이미 세션 기록을 내 디스크에 남깁니다. agentview는 그것을 읽기만 합니다.</span>
+      <span class="en">Claude Code already writes session transcripts to your disk. hearthling just reads them.</span>
+      <span class="ko">Claude Code는 이미 세션 기록을 내 디스크에 남깁니다. hearthling는 그것을 읽기만 합니다.</span>
     </p>
     <div class="how">
       <div class="step reveal"><div class="n">01</div>
@@ -255,14 +255,14 @@
     </h2>
     <div class="install-box reveal">
       <div class="row">
-        <code>npx github:sungeunstar/agentview</code>
-        <button class="copy-sm" type="button" data-copy="npx github:sungeunstar/agentview">
+        <code>npx github:sungeunstar/hearthling</code>
+        <button class="copy-sm" type="button" data-copy="npx github:sungeunstar/hearthling">
           <iconify-icon icon="solar:copy-linear"></iconify-icon>
           <span class="en">Copy</span><span class="ko">복사</span></button>
       </div>
       <div class="row">
-        <code><span class="dim">or</span> git clone https://github.com/sungeunstar/agentview <span class="dim">&amp;&amp;</span> cd agentview <span class="dim">&amp;&amp;</span> npm start</code>
-        <button class="copy-sm" type="button" data-copy="git clone https://github.com/sungeunstar/agentview && cd agentview && npm start">
+        <code><span class="dim">or</span> git clone https://github.com/sungeunstar/hearthling <span class="dim">&amp;&amp;</span> cd hearthling <span class="dim">&amp;&amp;</span> npm start</code>
+        <button class="copy-sm" type="button" data-copy="git clone https://github.com/sungeunstar/hearthling && cd hearthling && npm start">
           <iconify-icon icon="solar:copy-linear"></iconify-icon>
           <span class="en">Copy</span><span class="ko">복사</span></button>
       </div>
@@ -290,7 +290,7 @@
       </details>
       <details>
         <summary><span><span class="en">What happens if Claude Code changes its log format?</span><span class="ko">Claude Code 기록 형식이 바뀌면요?</span></span><iconify-icon icon="solar:add-circle-linear"></iconify-icon></summary>
-        <div class="a"><span class="en">The transcript format is unofficial, so agentview parses defensively: unknown lines are skipped, the server never crashes on them, and the dashboard tells you if it stops recognizing the format.</span>
+        <div class="a"><span class="en">The transcript format is unofficial, so hearthling parses defensively: unknown lines are skipped, the server never crashes on them, and the dashboard tells you if it stops recognizing the format.</span>
         <span class="ko">기록 형식은 비공식이라 방어적으로 읽습니다. 모르는 줄은 건너뛰고, 그것 때문에 서버가 죽지 않으며, 형식을 알아보지 못하게 되면 화면에 알립니다.</span></div>
       </details>
     </div>
@@ -308,7 +308,7 @@
       <span class="ko">무료, MIT 라이선스, 마음껏 포크하세요.</span>
     </p>
     <div class="cta-row reveal">
-      <a class="btn-primary" href="https://github.com/sungeunstar/agentview" target="_blank" rel="noopener">
+      <a class="btn-primary" href="https://github.com/sungeunstar/hearthling" target="_blank" rel="noopener">
         <iconify-icon icon="solar:star-bold"></iconify-icon>
         <span class="en">Star on GitHub</span><span class="ko">GitHub에서 별 누르기</span>
       </a>
@@ -318,8 +318,8 @@
 
 <footer>
   <div class="wrap foot-in">
-    <span>agentview &middot; MIT License</span>
-    <a href="https://github.com/sungeunstar/agentview" target="_blank" rel="noopener">github.com/sungeunstar/agentview</a>
+    <span>hearthling &middot; MIT License</span>
+    <a href="https://github.com/sungeunstar/hearthling" target="_blank" rel="noopener">github.com/sungeunstar/hearthling</a>
   </div>
 </footer>
 
@@ -332,12 +332,12 @@
     root.classList.toggle('lang-en', l !== 'ko');
     root.lang = l;
     langBtn.textContent = l === 'ko' ? 'English' : '한국어';
-    try { localStorage.setItem('agentview-lang', l); } catch(e){}
+    try { localStorage.setItem('hearthling-lang', l); } catch(e){}
   }
   langBtn.addEventListener('click', () => setLang(root.classList.contains('lang-ko') ? 'en' : 'ko'));
   // 기본은 영어. 한국어는 토글로만 전환한다(자동 감지 없음 — 사령관 지시 2026-08-12)
   try {
-    const saved = localStorage.getItem('agentview-lang');
+    const saved = localStorage.getItem('hearthling-lang');
     if (saved) setLang(saved);
   } catch(e){}
 

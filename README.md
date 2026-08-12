@@ -1,30 +1,30 @@
-# agentview
+# hearthling
 
 Watch your AI agents work — a local dashboard that renders your Claude Code sessions as a living game village.
 
-![agentview village](docs/assets/hero.jpg)
+![hearthling village](docs/assets/hero.jpg)
 
 Every session is a worker. Reads, greps and bash runs become mining, logging and hauling. When an agent finishes its job, a building goes up. Workers wear their model name and generated-token count as a nameplate.
 
-**Website:** https://sungeunstar.github.io/agentview/
+**Website:** https://sungeunstar.github.io/hearthling/
 
 ## Quick start
 
 ```
-npx github:sungeunstar/agentview
+npx github:sungeunstar/hearthling
 ```
 
 or
 
 ```
-git clone https://github.com/sungeunstar/agentview
-cd agentview
+git clone https://github.com/sungeunstar/hearthling
+cd hearthling
 npm start
 ```
 
 Opens at `http://localhost:4577`. Requires Node.js 18+ and [Claude Code](https://claude.com/claude-code).
 
-On Windows you can also double-click `start-agentview.cmd` to keep it running in a minimized window.
+On Windows you can also double-click `start-hearthling.cmd` to keep it running in a minimized window.
 
 ## Options
 
@@ -44,7 +44,7 @@ On Windows you can also double-click `start-agentview.cmd` to keep it running in
 
 Local-only by design. The server binds to `127.0.0.1`, makes no outbound requests, and has no accounts or telemetry. Your prompts and code never leave your machine.
 
-Note: the transcript format is unofficial. agentview parses defensively — unknown lines are skipped, and the dashboard warns you if a Claude Code update changes the format.
+Note: the transcript format is unofficial. hearthling parses defensively — unknown lines are skipped, and the dashboard warns you if a Claude Code update changes the format.
 
 ## Platforms
 

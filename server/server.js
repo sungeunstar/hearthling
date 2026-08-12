@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// agentview 브릿지 서버
+// hearthling 브릿지 서버
 // .claude/jobs/*/state.json 폴링 + 세션 트랜스크립트(jsonl) tail → 도구 호출 이벤트 추출 → HTTP로 노출
 // 외부 의존성 없음(Node 내장 모듈만 사용)
 
@@ -168,6 +168,7 @@ function readLiveSessions(excludeSessionIds) {
         state: age < ACTIVE_MS ? 'active' : 'idle',
         tempo: age < ACTIVE_MS ? 'working' : 'idle',
         tokens: Math.max(sessionTokens(sessionId, full), meta.tokens),
+        lastTool: meta.lastTool || null, // 화면이 언어에 맞게 조립하도록 원자료도 준다
         detail: meta.lastTool ? ('마지막 도구: ' + meta.lastTool) : (age < ACTIVE_MS ? '작업 중' : '대기 중'),
         intent: meta.intent,
         name: meta.intent ? meta.intent.slice(0, 40) : (meta.cwd ? path.basename(meta.cwd) : proj),
@@ -616,7 +617,7 @@ server.on('error', (e) => {
 
 // 세션 기록(작업 폴더명·프롬프트 첫 줄)이 흐르는 서버다 — 같은 네트워크의 다른 기기가 못 보게 localhost에만 연다.
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`agentview: http://localhost:${PORT}`);
+  console.log(`hearthling: http://localhost:${PORT}`);
   console.log(`Claude 홈: ${CLAUDE_HOME}`);
   if (!fs.existsSync(PROJECTS_DIR)) {
     console.log(`경고: ${PROJECTS_DIR} 가 없다 — Claude Code 세션 기록을 찾지 못했다.`);
