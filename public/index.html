@@ -1690,7 +1690,7 @@ function pickNode(category){
 //   토큰 얼마나 썼는지 보이면 됨" — NODES.build[0](제작 워커가 실제로 가는 그 자리)에 항상 떠 있는 반투명
 //   청사진 위에, 가장 토큰을 많이 쓴 진행중 job의 진행률만큼 실물이 아래에서부터 차오른다.
 const ENV_BASE = './assets/env/';
-let buildSiteSolid = null, buildSiteHeight = 11, buildSitePos = null; // ★사령관 "건물이 너무작음"(2026-08-08) — 캐릭터 기준(1.5) 4배(6)→7배(11)로 확대
+let buildSiteSolid = null, buildSiteHeight = 13, buildSitePos = null; // ★사령관 "건물이 너무작음"(2026-08-08) — 캐릭터 기준(1.5) 4배(6)→7배(11). 2026-08-13 대기항목("건설현장 집이 주변 건물보다 작아 보인다") 실측 19%→13으로 22.5%, 화면에서 가장 큰 덩어리가 되게
 let buildSiteClip = null, buildSiteGhost = null, buildSiteGroundY = 0, buildFillShown = 0; // 게이지 절단면·고스트·표시중 진행률(부드럽게 따라감)
 let buildSiteRadius = 0; // 건물 발자국 반경 — 워커가 통과하지 못하게 막는 경계
 const buildCompletedJobs = new Set();
@@ -1710,9 +1710,17 @@ const WORK_BUILDINGS = {
   // ★사령관 지적(2026-08-11) "조금 멀리 퍼지게 해야 하지 않나, 전체적으로 퍼지게 배치" —
   //   건물이 중앙(건설현장)에 몰려 답답했다. spread를 키워 활동권 가장자리로 밀고 각도도 벌린다.
   //   단 너무 벌리면 양끝이 잘린다(spread 1.05에서 대장간·시장이 화면 밖으로 반쯤 나감) — 0.86으로 되돌림.
-  smith: { file:'building_blacksmith_blue.gltf', name:'대장간', angle: Math.PI*0.94, spread: 0.86, height: 13.5, anvil: true },
-  saw:   { file:'building_lumbermill_blue.gltf', name:'제재소', angle: Math.PI*0.50, spread: 1.55, height: 15.0 },
-  trade: { file:'building_market_blue.gltf',     name:'시장',   angle: Math.PI*0.06, spread: 0.90, height: 13.0 },
+  // ★대기항목(2026-08-12) "시장이 화면 우측을 크게 차지한다 · 건설현장 집이 주변 건물보다 작아 보인다" —
+  //   실측(2026-08-13, 2560×1215)에서 원인은 배치가 아니라 **크기를 맞춘 축**이었다. 높이(Y)로만 정규화하면
+  //   좌판·울타리·마당이 딸린 모델일수록 가로로 부푼다. 같은 13m인데 시장은 가로 27.9m(화면 44.8%),
+  //   대장간은 21.7m(44.5%)여서 둘이 화면 폭 89%를 먹었고 대장간은 왼쪽 끝이 잘렸다.
+  //   → 가로 발자국(footprint)을 기준으로 맞추고 높이는 결과값으로 둔다. height는 이제 참고 표기다.
+  //   목표: 좌우 건물 각 32%, 가운데 건설현장이 가장 큰 덩어리가 되게.
+  //   ※ footprint는 회전 전 기준이다. 건물은 카메라를 향해 약 45° 돌아가므로 화면 폭은 여기서 1.2~1.3배 커진다.
+  //   ※ 건설현장을 키우면 카메라 반경(FRAME_R)이 함께 커져 좌우 건물이 밖으로 밀린다 — spread를 같이 줄인다.
+  smith: { file:'building_blacksmith_blue.gltf', name:'대장간', angle: Math.PI*0.94, spread: 0.86, footprint: 12.2, anvil: true },
+  saw:   { file:'building_lumbermill_blue.gltf', name:'제재소', angle: Math.PI*0.50, spread: 1.55, footprint: 12.5 },
+  trade: { file:'building_market_blue.gltf',     name:'시장',   angle: Math.PI*0.06, spread: 0.80, footprint: 13.8 },
 };
 // 각 작업장의 워커 작업 지점(건물 앞) — pickNode가 목적지로 쓴다.
 const WORK_SPOT = {};
@@ -1729,7 +1737,9 @@ async function loadWorkBuildings(){
     root.traverse(o => { if (o.isMesh){ o.castShadow = true; o.receiveShadow = true; if (o.material && o.material.map) o.material.map.colorSpace = THREE.SRGBColorSpace; } });
     const bb0 = new THREE.Box3().setFromObject(root);
     const sz = new THREE.Vector3(); bb0.getSize(sz);
-    root.scale.setScalar(b.height / (sz.y || 1));
+    // 가로 발자국 기준 정규화(위 주석 참고). footprint가 없으면 예전처럼 높이 기준.
+    const spanXZ = Math.max(sz.x, sz.z) || 1;
+    root.scale.setScalar(b.footprint ? b.footprint / spanXZ : b.height / (sz.y || 1));
     const bb = new THREE.Box3().setFromObject(root);
     const ctr = bb.getCenter(new THREE.Vector3());
     root.position.x -= ctr.x; root.position.z -= ctr.z; root.position.y -= bb.min.y;
@@ -2835,6 +2845,10 @@ function resolveOverlap(w, dt){
     const k = (WORKER_SEP - sd) / sd;
     px += sx*k; pz += sz*k;
   }
+  // ★2026-08-13 실측 — 건물 밖으로 밀어내는 안전망이 아래 조기 반환 뒤에 있어서, **다른 워커와 겹쳤을 때만**
+  //   돌았다. 혼자 서 있는 워커는 건물 안에 들어가 있어도 영원히 나오지 않는다(시장 크기를 줄이며 건물이
+  //   안쪽으로 옮겨지자 대기 중이던 워커가 0.82m 파묻힌 채 고정). 서 있는 동안에는 겹침과 무관하게 늘 건다.
+  keepOutOfBuilding(p);
   if (px === 0 && pz === 0) return;
   const g = Math.min(1, dt*4) * 0.5; // 튀지 않게 서서히
   p.x += px*g; p.z += pz*g;
