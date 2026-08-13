@@ -2324,6 +2324,48 @@ function ensureWorker(jobId){
   return w;
 }
 
+// ══ 퇴장 — ★사령관 지적(2026-08-13) "ai들이 엄청 많이 생김, 안 쓰는 애들은 자동으로 떠나야 하지 않나" ══
+// 목록에서 빠진 워커를 지우는 코드가 아예 없어서, 서버가 내보내도 새로고침 전까지 마을에 계속 서 있었다.
+// 사라진 job은 그 자리에서 지우지 않고 **마을 밖으로 걸어 나가게** 한다 — 갑자기 없어지면 눈이 못 따라간다.
+function startLeaving(w){
+  if (w.leaving || w.transient || !w.group) return;
+  w.leaving = true;
+  w.state = 'LEAVE';
+  w.waypoint = null; w._stuckSince = 0; w._lastDist = null; w._flips = 0; w._giveUp = false;
+  w.queue = null; w._nextTool = null;
+  equipTool(w, null); setCarrying(w, false);
+  w._leaveBy = nowMs() + 25000;      // 길이 막혀도 25초 뒤엔 사라진다(제자리에 굳지 않게)
+  // 흐려지게 만들 재질은 **이 워커 것만** 복제해둔다 — 복제 메시는 재질을 공유하므로,
+  // 공유된 재질의 opacity를 건드리면 같은 모델을 쓰는 다른 워커까지 같이 흐려진다.
+  w._fadeMats = [];
+  w.group.traverse(o => {
+    if (!o.isMesh || !o.material) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    o.material = Array.isArray(o.material)
+      ? mats.map(m => { const c = m.clone(); c.transparent = true; w._fadeMats.push(c); return c; })
+      : (() => { const c = mats[0].clone(); c.transparent = true; w._fadeMats.push(c); return c; })();
+  });
+  w._nextChatAt = 0;                 // 작별 인사는 쉬는 시간과 무관하게
+  sayChat(w, 'leave');
+  // 지금 서 있는 방향 그대로 바깥으로 — 마을을 가로질러 되돌아가지 않게
+  const p = w.group.position;
+  const a = Math.atan2(p.z - ANCHOR.z, p.x - ANCHOR.x);
+  const R = FRAME_R * 2.4;
+  w.target = { x: ANCHOR.x + Math.cos(a) * R, z: ANCHOR.z + Math.sin(a) * R, r: 0 };
+}
+// job이 다시 살아난 경우(세션 재개) — 퇴장을 취소하고 마을에 남는다.
+function cancelLeaving(w){
+  if (!w.leaving) return;
+  w.leaving = false;
+  w.state = 'IDLE'; w.target = null; w.waypoint = null;
+  for (const m of (w._fadeMats || [])) m.opacity = 1;
+}
+function removeWorker(w){
+  if (w.group) scene.remove(w.group);
+  for (const [k, v] of workers) if (v === w) workers.delete(k);
+}
+window.__leave = id => { const w = workers.get(id); if (w) startLeaving(w); return !!w; }; // 디버그 훅 — 퇴장 확인용
+
 function spawnTransientChild(parentJobId, clipName){
   const w = baseWorker(parentJobId, true);
   loadCharacterFor(w).then(() => playCategory(w, clipName, 2200));
@@ -2352,6 +2394,7 @@ const CHAT = KO ? {
   blocked:['언제까지 기다려야 하나', '대답 좀 해주시오', '기다리는 게 제일 힘들어'],
   done:   ['오늘 일 끝!', '수고했다 다들', '이제 좀 쉬자'],
   failed: ['망했다…', '이게 왜 안 되지', '처음부터 다시 해야 하나'],
+  leave:  ['이만 가보겠소', '다음에 또 봅시다', '집에 갈 시간이군', '수고들 하시오'],
 } : {
   ore:    ['This vein looks rich', 'Pickaxe is going dull…', 'One more swing should do it', 'Oh, my shoulders…'],
   forage: ['A thick one, this tree', 'Timber—!', 'Sawdust in my eye', 'Time to sharpen the axe'],
@@ -2365,6 +2408,7 @@ const CHAT = KO ? {
   blocked:['How long must I wait', 'Somebody answer me', 'Waiting is the hardest part'],
   done:   ['Work is done for today!', 'Good work, everyone', 'Time to rest'],
   failed: ['It is ruined…', 'Why will this not work', 'Do I start over?'],
+  leave:  ['I will be off then', 'See you around', 'Time to head home', 'Good luck to you all'],
 };
 function sayChat(w, kind){
   const lines = CHAT[kind];
@@ -2550,6 +2594,14 @@ async function poll(){
       //   그리고 토큰양이 보여야 할 듯" — 머리 위 이름표를 세션 제목에서 **모델명 + 누적 토큰**으로 교체.
       const shown = disp(modelLabel(j.model)) + ' · ' + fmtTok(j.tokens || 0);
       if (w._labelName !== shown){ w._labelName = shown; drawTextFit(w.idLabel, shown, '#cfd9c2', 20); }
+    }
+
+    // 목록에서 빠진 워커는 마을을 떠난다. 세션이 다시 살아나면 퇴장을 취소하고 남는다.
+    // (Agent 소환으로 잠깐 나타나는 전이 자식은 자기 타이머로 사라지므로 건드리지 않는다)
+    const liveIds = new Set(jr.jobs.map(j => j.jobId));
+    for (const [id, w] of workers){
+      if (w.transient) continue;
+      if (liveIds.has(id)) cancelLeaving(w); else startLeaving(w);
     }
 
     for (const ev of er.events){
@@ -2937,9 +2989,22 @@ function faceTarget(w){
 function tickWorker(w, now, dt){
   const st = w.state || 'IDLE';
   tickChat(w, now);
-  // 이동 중(TRAVEL/HAUL)에는 스티어링이 분리를 이미 섞어 처리한다 — 서 있는 상태만 따로 벌려준다.
-  if (st !== 'TRAVEL' && st !== 'HAUL') resolveOverlap(w, dt);
+  // 이동 중(TRAVEL/HAUL/LEAVE)에는 스티어링이 분리를 이미 섞어 처리한다 — 서 있는 상태만 따로 벌려준다.
+  if (st !== 'TRAVEL' && st !== 'HAUL' && st !== 'LEAVE') resolveOverlap(w, dt);
   switch (st){
+
+    // 마을을 떠나는 중 — 화면 밖으로 걸어 나가면서 서서히 사라진다.
+    case 'LEAVE': {
+      const arrived = !w.target || steerWorker(w, dt);
+      // 화면 밖으로 나가는 마지막 구간에서 흐려진다 — 경계에서 툭 사라지지 않게.
+      // 길이 막혀 제자리에 있으면 남은 시간으로 흐려져, 어느 쪽이든 사라지는 게 보인다.
+      const d = w.target ? Math.hypot(w.target.x - w.group.position.x, w.target.z - w.group.position.z) : 0;
+      const left = (w._leaveBy - nowMs()) / 4000;
+      const fade = Math.max(0, Math.min(1, d / (FRAME_R * 0.5), left));
+      for (const m of (w._fadeMats || [])) m.opacity = fade;
+      if (arrived || nowMs() > w._leaveBy) removeWorker(w);
+      break;
+    }
 
     case 'TRAVEL': {
       if (!w.target){ finishCycle(w); break; }

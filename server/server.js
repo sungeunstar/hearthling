@@ -26,6 +26,12 @@ const PORT = parseInt(argValue('--port') || process.env.PORT || '4577', 10);
 //   목록에 아예 안 잡혔다**. 세션 트랜스크립트를 직접 라이브 워커로 잡아 실시간 도구 호출을 흘려보낸다.
 const LIVE_WINDOW_MS = 20 * 60 * 1000; // 최근 20분 안에 갱신된 세션만 워커로 띄운다
 const ACTIVE_MS = 25 * 1000;           // 25초 안에 갱신됐으면 '일하는 중'
+// ★사령관 지적(2026-08-13 "ai들이 엄청 많이 생김, 안 쓰는 애들은 자동으로 떠나야 하지 않나") —
+//   readJobStates()가 `~/.claude/jobs` 폴더를 **나이도 상태도 보지 않고** 전부 내보내고 있었다.
+//   실측: 2026-08-07에 failed/done으로 끝난 작업 둘이 엿새 뒤에도 마을에 서 있었다.
+//   끝난 작업은 완료가 화면에 보일 만큼만 남기고 내보낸다. 안 끝났어도 갱신이 끊기면 마찬가지다.
+const DONE_STATES = new Set(['done', 'failed', 'blocked', 'cancelled', 'canceled', 'stopped', 'completed']);
+const DONE_GRACE_MS = 3 * 60 * 1000;   // 끝난 작업이 마을에 더 머무는 시간(완성·퇴장을 볼 수 있게)
 const sessionMeta = new Map();         // sessionId -> { name, intent, tokens, lastTool }
 
 // jobId -> { offset, path }  트랜스크립트 tail 커서 (서버 시작 시점부터 새 이벤트만)
@@ -69,11 +75,18 @@ function readJobStates() {
   } catch (e) {
     return out;
   }
+  const now = Date.now();
   for (const id of ids) {
     const statePath = path.join(JOBS_DIR, id, 'state.json');
     try {
       const raw = fs.readFileSync(statePath, 'utf8');
       const s = JSON.parse(raw);
+      // 마지막 갱신 시각 — state.json에 없으면 파일 수정 시각으로 대신한다.
+      let last = Date.parse(s.updatedAt || '');
+      if (!isFinite(last)) { try { last = fs.statSync(statePath).mtimeMs; } catch (e) { last = 0; } }
+      const age = now - last;
+      const finished = DONE_STATES.has(String(s.state || '').toLowerCase());
+      if (finished ? age > DONE_GRACE_MS : age > LIVE_WINDOW_MS) continue; // 떠날 때가 된 워커
       out.push({
         jobId: id,
         state: s.state || null,
