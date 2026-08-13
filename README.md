@@ -38,6 +38,7 @@ On Windows you can also double-click `start-hearthling.cmd` to keep it running i
 
 - A single zero-dependency Node server tails the session transcripts Claude Code already writes to your disk (`~/.claude/projects`), plus background job state (`~/.claude/jobs`).
 - Live sessions and background agents appear as villagers. Tool calls drive what they do; agent completion finishes the construction site.
+- Villagers retire on their own. A job that has finished leaves after a few minutes, and one that stops updating leaves after twenty — it walks out of the village rather than blinking out. If the session comes back, so does the worker.
 - A token ledger indexes daily/weekly generated tokens per model, incrementally — first full scan runs in the background and recent days fill in within seconds.
 
 ## Privacy

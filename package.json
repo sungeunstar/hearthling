@@ -1,6 +1,6 @@
 {
   "name": "hearthling",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Watch your AI agents work — your Claude Code sessions as a living game village. Local-only.",
   "keywords": ["claude-code", "claude", "dashboard", "visualization", "agents", "ai", "monitoring", "threejs"],
   "homepage": "https://hearthling.vercel.app",
